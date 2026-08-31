@@ -4,13 +4,14 @@ import math, json
 from liquid27.material import *
 from liquid27.glyphs import glyph
 from liquid27.glyphs_v4 import glyph_v4
+from liquid27.glyphs_v4_extra import glyph_v4_extra
 from liquid27.catalog import ICON_SPECS
 
 ROOT=Path(__file__).resolve().parents[1]
 
 
 def layers_for(kind):
-    return glyph_v4(kind) or glyph(kind)
+    return glyph_v4(kind) or glyph_v4_extra(kind) or glyph(kind)
 
 
 def render(name,bgspec,kind):
@@ -46,7 +47,6 @@ def preview(images, outdir):
         label=n[6:].replace('_',' ')[:17]; b=fd.textbbox((0,0),label,font=ff); fd.text((x+85-(b[2]-b[0])/2,y+132),label,font=ff,fill=(238,238,242))
     full.save(outdir/'preview_full.png')
 
-    # Wallpaper preview tests glass against color-rich content.
     W,H=1080,1280; wall=Image.new('RGB',(W,H),'#171326')
     for col,xy,rad in [('#7f335f',(240,280),600),('#233b8a',(850,260),650),('#693b22',(800,970),650)]:
         m=Image.radial_gradient('L').resize((rad,rad)); m=ImageOps.invert(m).point(lambda v:int(v*.65))
@@ -57,7 +57,6 @@ def preview(images, outdir):
         label=n[6:].replace('_',' ')[:12]; b=d.textbbox((0,0),label,font=font2); d.text((x+58-(b[2]-b[0])/2,y+126),label,font=font2,fill=(245,245,248))
     wall.save(outdir/'preview_wallpaper.png')
 
-    # Approximate OnePlus home-screen scale.
     hs=Image.new('RGB',(1080,1920),(235,236,240)); d=ImageDraw.Draw(hs); f=ImageFont.truetype(FONT_REG,24)
     for i,n in enumerate(show[:20]):
         x=93+(i%4)*245; y=300+(i//4)*240; ic=images[n].resize((122,122),Image.Resampling.LANCZOS); hs.paste(ic,(x,y),ic)
