@@ -23,19 +23,17 @@ jobs:
           gradle-version: '8.13'
       - name: Install icon tooling
         run: python3 -m pip install --disable-pip-version-check Pillow==11.3.0
-      - name: Generate SkeuoOS fallback icons
-        run: python3 tools/generate_icons.py
-      - name: Import complete zagnut iOS 6 collection
-        run: python3 tools/import_zagnut_ios6.py
+      - name: Generate Liquid27 icons
+        run: python3 tools/generate_liquid27.py
       - name: Verify pack
         run: python3 tools/check_pack.py
-      - name: Show import report
-        run: cat build/ios6-import-report.json
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
-      - name: Upload APK
+      - name: Upload APK and preview
         uses: actions/upload-artifact@v4
         with:
-          name: SkeuoOS-OnePlus-v0.2.0-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: SkeuoOS-OnePlus-v3.0.0
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            build/liquid27-preview.png
           if-no-files-found: error
