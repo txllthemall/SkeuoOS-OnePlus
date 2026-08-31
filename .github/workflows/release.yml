@@ -2,7 +2,8 @@ name: Release APK
 
 on:
   push:
-    tags: [ 'v*' ]
+    branches: [ main ]
+    paths: [ '.release-v0.1.0' ]
 
 permissions:
   contents: write
@@ -26,7 +27,16 @@ jobs:
       - run: python3 tools/check_pack.py
       - run: gradle --no-daemon :app:assembleDebug
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-${GITHUB_REF_NAME}.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-v0.1.0.apk
       - uses: softprops/action-gh-release@v2
         with:
-          files: SkeuoOS-OnePlus-${{ github.ref_name }}.apk
+          tag_name: v0.1.0
+          name: SkeuoOS OnePlus v0.1.0
+          body: |
+            First public build of SkeuoOS OnePlus.
+
+            - Skeuomorphic icon pack for OnePlus / OxygenOS
+            - 66 icons
+            - 152 Android component mappings
+            - APK built automatically by GitHub Actions
+          files: SkeuoOS-OnePlus-v0.1.0.apk
