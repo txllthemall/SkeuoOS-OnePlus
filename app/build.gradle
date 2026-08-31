@@ -16,10 +16,12 @@ android {
     }
 }
 
-
+// Icon preparation is explicit in CI/local build instructions:
+//   python3 tools/generate_icons.py
+//   python3 tools/import_zagnut_ios6.py
+// Keeping it outside preBuild prevents the generated fallback artwork from
+// overwriting the real upstream iOS 6 overlays immediately before packaging.
 tasks.register('generateSkeuoIcons', Exec) {
     workingDir rootProject.projectDir
     commandLine 'python3', 'tools/generate_icons.py'
 }
-
-preBuild.dependsOn generateSkeuoIcons
