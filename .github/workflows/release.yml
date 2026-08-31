@@ -3,7 +3,7 @@ name: Release APK
 on:
   push:
     branches: [ main ]
-    paths: [ '.release-v3.0.0' ]
+    paths: [ '.release-v4.0.0' ]
 
 permissions:
   contents: write
@@ -22,34 +22,39 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: python3 -m pip install --disable-pip-version-check Pillow==11.3.0
-      - name: Generate Liquid27 icons
+      - run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
+      - name: Generate Liquid27 v4 icons
         run: python3 tools/generate_liquid27.py
+      - name: Visual QA
+        run: python3 tools/qa_liquid27.py
       - name: Verify pack
         run: python3 tools/check_pack.py
       - run: gradle --no-daemon :app:assembleDebug
-      - name: Rename artifacts
+      - name: Rename release artifacts
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-v3.0.0.apk
-          cp build/liquid27-preview.png SkeuoOS-Liquid27-v3-preview.png
+          cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-v4.0.0.apk
+          cp build/liquid27-v4/preview_full.png SkeuoOS-Liquid27-v4-full-preview.png
+          cp build/liquid27-v4/preview_home.png SkeuoOS-Liquid27-v4-home-preview.png
+          cp DESIGN_NOTES.md SkeuoOS-Liquid27-v4-DESIGN_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.0.0
-          name: SkeuoOS Liquid27 v3.0.0
+          tag_name: v4.0.0
+          name: SkeuoOS Liquid27 v4.0.0
           body: |
-            Full visual rebuild around the iOS 27 Liquid Glass design language.
+            Clean-room static Android interpretation of Apple's iOS 27 app-icon material system.
 
-            - 66 original icons regenerated from scratch
-            - 152 Android component mappings retained
-            - sharper layered glass instead of the old iOS 6 artwork
-            - restrained translucency for stronger legibility
-            - separate material layers with simulated refraction
-            - fixed top/bottom specular highlights rather than motion shimmer
-            - simplified, optically balanced glyph geometry
-            - 768 px working render downsampled to 512 px for cleaner edges
-            - no zagnut/iOS-6-Icons assets are bundled in v3
+            - layer-based rendering instead of v3's shared pseudo-skeuomorphic shell
+            - actual under-layer sampling for static refraction
+            - stronger edge refraction and crisp vertical-light specular highlights
+            - restrained translucency and shadows for launcher-scale legibility
+            - curated v4 geometry for the most visible system and third-party apps
+            - 152 existing Android component mappings retained
+            - no iOS 6 / zagnut artwork or importer in the v4 build
+            - full contact sheet, OnePlus-scale preview and design notes included
 
-            This is an original Android icon pack inspired by Apple's current Liquid Glass design principles. It is not an extraction of Apple's iOS 27 icon assets and is not affiliated with Apple.
+            The native Apple renderer is dynamic; this pack is a static PNG approximation for OxygenOS. It does not contain extracted Apple icon assets and is not affiliated with Apple.
           files: |
-            SkeuoOS-OnePlus-v3.0.0.apk
-            SkeuoOS-Liquid27-v3-preview.png
+            SkeuoOS-OnePlus-v4.0.0.apk
+            SkeuoOS-Liquid27-v4-full-preview.png
+            SkeuoOS-Liquid27-v4-home-preview.png
+            SkeuoOS-Liquid27-v4-DESIGN_NOTES.md
