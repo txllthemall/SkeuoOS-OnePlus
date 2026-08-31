@@ -8,16 +8,16 @@ android {
         applicationId 'io.github.txllthemall.skeuoos'
         minSdk 26
         targetSdk 36
-        versionCode 3
-        versionName '3.0.0'
+        versionCode 4
+        versionName '4.0.0'
     }
     buildTypes {
         release { minifyEnabled false }
     }
 }
 
-// v3 artwork is generated locally from original vector-like geometry and
-// Liquid Glass material simulation. No upstream Apple icon files are bundled.
+// v4 uses original vector-like geometry plus a layer-based static Liquid Glass renderer.
+// No Apple raster assets or v2 iOS 6 artwork are bundled or downloaded.
 tasks.register('generateLiquid27Icons', Exec) {
     workingDir rootProject.projectDir
     commandLine 'python3', 'tools/generate_liquid27.py'
