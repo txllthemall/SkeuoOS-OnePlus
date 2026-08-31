@@ -3,7 +3,7 @@ name: Release APK
 on:
   push:
     branches: [ main ]
-    paths: [ '.release-v0.2.0' ]
+    paths: [ '.release-v3.0.0' ]
 
 permissions:
   contents: write
@@ -23,32 +23,33 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: python3 -m pip install --disable-pip-version-check Pillow==11.3.0
-      - name: Generate SkeuoOS fallback icons
-        run: python3 tools/generate_icons.py
-      - name: Import complete zagnut iOS 6 collection
-        run: python3 tools/import_zagnut_ios6.py
+      - name: Generate Liquid27 icons
+        run: python3 tools/generate_liquid27.py
       - name: Verify pack
         run: python3 tools/check_pack.py
       - run: gradle --no-daemon :app:assembleDebug
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-v0.2.0.apk
+      - name: Rename artifacts
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-v3.0.0.apk
+          cp build/liquid27-preview.png SkeuoOS-Liquid27-v3-preview.png
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.0
-          name: SkeuoOS OnePlus v0.2.0
+          tag_name: v3.0.0
+          name: SkeuoOS Liquid27 v3.0.0
           body: |
-            Full iOS 6 collection build for OnePlus / OxygenOS.
+            Full visual rebuild around the iOS 27 Liquid Glass design language.
 
-            - 591 packaged icon resources
-            - 525 upstream icons imported from zagnut531/iOS-6-Icons
-            - 66 SkeuoOS fallback icons
-            - 152 Android component mappings
-            - 35 common mappings automatically use matching upstream artwork
-            - full upstream collection available in the manual icon picker
-            - truncated upstream PNGs recovered during CI
+            - 66 original icons regenerated from scratch
+            - 152 Android component mappings retained
+            - sharper layered glass instead of the old iOS 6 artwork
+            - restrained translucency for stronger legibility
+            - separate material layers with simulated refraction
+            - fixed top/bottom specular highlights rather than motion shimmer
+            - simplified, optically balanced glyph geometry
+            - 768 px working render downsampled to 512 px for cleaner edges
+            - no zagnut/iOS-6-Icons assets are bundled in v3
 
-            Upstream artwork source:
-            https://github.com/zagnut531/iOS-6-Icons
-
-            The upstream repository does not provide a standard content license. Imported Apple and third-party artwork is not covered by SkeuoOS's MIT license and remains the property of its respective owners/creators.
-          files: SkeuoOS-OnePlus-v0.2.0.apk
+            This is an original Android icon pack inspired by Apple's current Liquid Glass design principles. It is not an extraction of Apple's iOS 27 icon assets and is not affiliated with Apple.
+          files: |
+            SkeuoOS-OnePlus-v3.0.0.apk
+            SkeuoOS-Liquid27-v3-preview.png
