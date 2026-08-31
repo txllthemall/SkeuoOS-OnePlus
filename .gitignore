@@ -1,0 +1,12 @@
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+*.iml
+.DS_Store
+
+# Generated artwork (recreated by tools/generate_icons.py)
+app/src/main/res/drawable-nodpi/*.png
+app/src/main/res/mipmap-*/ic_launcher.png
+docs/preview.png

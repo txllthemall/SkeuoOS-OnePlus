@@ -1,0 +1,464 @@
+{
+  "skeuo_phone": {
+    "top": "#5fe77b",
+    "bottom": "#0aa43c",
+    "glyph": "phone",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_messages": {
+    "top": "#62f27e",
+    "bottom": "#10ae48",
+    "glyph": "bubble",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_camera": {
+    "top": "#f2f1ea",
+    "bottom": "#9fa3aa",
+    "glyph": "camera",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_photos": {
+    "top": "#fafafa",
+    "bottom": "#d8d8d8",
+    "glyph": "photos",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_settings": {
+    "top": "#b7bbc0",
+    "bottom": "#686d75",
+    "glyph": "gear",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_mail": {
+    "top": "#59c8ff",
+    "bottom": "#1676d2",
+    "glyph": "mail",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_gmail": {
+    "top": "#f7f7f7",
+    "bottom": "#d9d9d9",
+    "glyph": "gmail",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_maps": {
+    "top": "#aadf78",
+    "bottom": "#5da85a",
+    "glyph": "map",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_maps": {
+    "top": "#90d86e",
+    "bottom": "#4c9d56",
+    "glyph": "map",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_clock": {
+    "top": "#1d1d1f",
+    "bottom": "#55565a",
+    "glyph": "clock",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_weather": {
+    "top": "#68c8ff",
+    "bottom": "#2578d7",
+    "glyph": "text",
+    "text": "\u2600",
+    "foreground": "#ffffff"
+  },
+  "skeuo_notes": {
+    "top": "#fff08d",
+    "bottom": "#e2bd3d",
+    "glyph": "text",
+    "text": "NOTE",
+    "foreground": "#5d4c16"
+  },
+  "skeuo_calendar": {
+    "top": "#f7f7f7",
+    "bottom": "#dadada",
+    "glyph": "calendar",
+    "text": "31",
+    "foreground": "#ffffff"
+  },
+  "skeuo_appstore": {
+    "top": "#55c7ff",
+    "bottom": "#1378d5",
+    "glyph": "bag",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_facetime": {
+    "top": "#65e783",
+    "bottom": "#15ad49",
+    "glyph": "text",
+    "text": "\u25b6",
+    "foreground": "#ffffff"
+  },
+  "skeuo_music": {
+    "top": "#ff5b87",
+    "bottom": "#e11954",
+    "glyph": "music",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_wallet": {
+    "top": "#c1b096",
+    "bottom": "#75634b",
+    "glyph": "wallet",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_files": {
+    "top": "#66c6ff",
+    "bottom": "#2688d9",
+    "glyph": "folder",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_calculator": {
+    "top": "#6c6c70",
+    "bottom": "#222225",
+    "glyph": "calculator",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_health": {
+    "top": "#ffffff",
+    "bottom": "#e9e9e9",
+    "glyph": "heart",
+    "text": "",
+    "foreground": "#ff3b67"
+  },
+  "skeuo_compass": {
+    "top": "#555b63",
+    "bottom": "#111317",
+    "glyph": "text",
+    "text": "N",
+    "foreground": "#ffffff"
+  },
+  "skeuo_recorder": {
+    "top": "#ffffff",
+    "bottom": "#e5e5e5",
+    "glyph": "wave",
+    "text": "",
+    "foreground": "#e8414f"
+  },
+  "skeuo_chrome": {
+    "top": "#ffffff",
+    "bottom": "#d7d7d7",
+    "glyph": "chrome",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_youtube": {
+    "top": "#ff493e",
+    "bottom": "#d80000",
+    "glyph": "play",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_revanced": {
+    "top": "#292a2d",
+    "bottom": "#111214",
+    "glyph": "play",
+    "text": "",
+    "foreground": "#e64949"
+  },
+  "skeuo_telegram": {
+    "top": "#66c7f1",
+    "bottom": "#1585c5",
+    "glyph": "plane",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_discord": {
+    "top": "#777ff4",
+    "bottom": "#4b54cb",
+    "glyph": "discord",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_instagram": {
+    "top": "#ef6a9f",
+    "bottom": "#8c3bb4",
+    "glyph": "camera",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_twitter": {
+    "top": "#5bbcff",
+    "bottom": "#1785cf",
+    "glyph": "text",
+    "text": "X",
+    "foreground": "#ffffff"
+  },
+  "skeuo_whatsapp": {
+    "top": "#50dd78",
+    "bottom": "#159c44",
+    "glyph": "bubble",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_facebook": {
+    "top": "#5f83c5",
+    "bottom": "#294c91",
+    "glyph": "text",
+    "text": "f",
+    "foreground": "#ffffff"
+  },
+  "skeuo_snapchat": {
+    "top": "#fff962",
+    "bottom": "#e0cc00",
+    "glyph": "text",
+    "text": "S",
+    "foreground": "#141414"
+  },
+  "skeuo_reddit": {
+    "top": "#ff6a3c",
+    "bottom": "#d94215",
+    "glyph": "text",
+    "text": "r/",
+    "foreground": "#ffffff"
+  },
+  "skeuo_pinterest": {
+    "top": "#df4a55",
+    "bottom": "#a80f1d",
+    "glyph": "text",
+    "text": "P",
+    "foreground": "#ffffff"
+  },
+  "skeuo_tiktok": {
+    "top": "#303136",
+    "bottom": "#0c0d0f",
+    "glyph": "text",
+    "text": "\u266a",
+    "foreground": "#ffffff"
+  },
+  "skeuo_slack": {
+    "top": "#8765b5",
+    "bottom": "#493170",
+    "glyph": "text",
+    "text": "S",
+    "foreground": "#ffffff"
+  },
+  "skeuo_spotify": {
+    "top": "#4dde77",
+    "bottom": "#119b40",
+    "glyph": "text",
+    "text": "\u224b",
+    "foreground": "#111111"
+  },
+  "skeuo_netflix": {
+    "top": "#3a3a3a",
+    "bottom": "#0f0f0f",
+    "glyph": "text",
+    "text": "N",
+    "foreground": "#e50914"
+  },
+  "skeuo_amazon": {
+    "top": "#52575e",
+    "bottom": "#25282c",
+    "glyph": "text",
+    "text": "a",
+    "foreground": "#ffb12b"
+  },
+  "skeuo_uber": {
+    "top": "#4d4f54",
+    "bottom": "#17181a",
+    "glyph": "text",
+    "text": "U",
+    "foreground": "#ffffff"
+  },
+  "skeuo_paypal": {
+    "top": "#4a88c8",
+    "bottom": "#173f83",
+    "glyph": "text",
+    "text": "P",
+    "foreground": "#ffffff"
+  },
+  "skeuo_venmo": {
+    "top": "#4ca2dc",
+    "bottom": "#1973b2",
+    "glyph": "text",
+    "text": "V",
+    "foreground": "#ffffff"
+  },
+  "skeuo_robinhood": {
+    "top": "#7edb71",
+    "bottom": "#229c37",
+    "glyph": "text",
+    "text": "R",
+    "foreground": "#ffffff"
+  },
+  "skeuo_strava": {
+    "top": "#ff8b45",
+    "bottom": "#e34a14",
+    "glyph": "text",
+    "text": "\u25b3",
+    "foreground": "#ffffff"
+  },
+  "skeuo_zoom": {
+    "top": "#6fa7ff",
+    "bottom": "#2d6fd8",
+    "glyph": "text",
+    "text": "Z",
+    "foreground": "#ffffff"
+  },
+  "skeuo_shazam": {
+    "top": "#5caeff",
+    "bottom": "#176dc3",
+    "glyph": "text",
+    "text": "S",
+    "foreground": "#ffffff"
+  },
+  "skeuo_kaspi": {
+    "top": "#ff6f61",
+    "bottom": "#dc332b",
+    "glyph": "text",
+    "text": "K",
+    "foreground": "#ffffff"
+  },
+  "skeuo_2gis": {
+    "top": "#a8e57b",
+    "bottom": "#56a93e",
+    "glyph": "text",
+    "text": "2GIS",
+    "foreground": "#ffffff"
+  },
+  "skeuo_soundcloud": {
+    "top": "#ff9745",
+    "bottom": "#f04d0b",
+    "glyph": "cloud",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_chatgpt": {
+    "top": "#6f7776",
+    "bottom": "#202624",
+    "glyph": "text",
+    "text": "AI",
+    "foreground": "#ffffff"
+  },
+  "skeuo_github": {
+    "top": "#55575c",
+    "bottom": "#1c1d20",
+    "glyph": "text",
+    "text": "<>",
+    "foreground": "#ffffff"
+  },
+  "skeuo_steam": {
+    "top": "#4f769a",
+    "bottom": "#182d43",
+    "glyph": "gamepad",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_gamehub": {
+    "top": "#4a4d52",
+    "bottom": "#17191d",
+    "glyph": "gamepad",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_photos": {
+    "top": "#fafafa",
+    "bottom": "#d8d8d8",
+    "glyph": "photos",
+    "text": "",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_keep": {
+    "top": "#ffd864",
+    "bottom": "#db9f21",
+    "glyph": "text",
+    "text": "K",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_calendar": {
+    "top": "#6da4ef",
+    "bottom": "#376bb2",
+    "glyph": "calendar",
+    "text": "31",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_meet": {
+    "top": "#62b995",
+    "bottom": "#2f8265",
+    "glyph": "text",
+    "text": "M",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_drive": {
+    "top": "#71b06f",
+    "bottom": "#3f7850",
+    "glyph": "text",
+    "text": "\u25b3",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_docs": {
+    "top": "#6d9eea",
+    "bottom": "#355fa5",
+    "glyph": "text",
+    "text": "D",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_sheets": {
+    "top": "#67b97d",
+    "bottom": "#3d8050",
+    "glyph": "text",
+    "text": "S",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_slides": {
+    "top": "#e3b75c",
+    "bottom": "#b77a20",
+    "glyph": "text",
+    "text": "SL",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_translate": {
+    "top": "#76a8ef",
+    "bottom": "#3b69b2",
+    "glyph": "text",
+    "text": "\u6587",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_search": {
+    "top": "#eef2f5",
+    "bottom": "#c8d0d6",
+    "glyph": "text",
+    "text": "G",
+    "foreground": "#4285f4"
+  },
+  "skeuo_google_classroom": {
+    "top": "#58b67b",
+    "bottom": "#2d7d4c",
+    "glyph": "text",
+    "text": "C",
+    "foreground": "#ffffff"
+  },
+  "skeuo_google_one": {
+    "top": "#7e9ff3",
+    "bottom": "#4968bb",
+    "glyph": "text",
+    "text": "1",
+    "foreground": "#ffffff"
+  },
+  "skeuo_playstore": {
+    "top": "#54c7ee",
+    "bottom": "#1c8bc1",
+    "glyph": "bag",
+    "text": "",
+    "foreground": "#ffffff"
+  }
+}

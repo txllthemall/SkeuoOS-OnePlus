@@ -1,0 +1,25 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'io.github.txllthemall.skeuoos'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.txllthemall.skeuoos'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+    }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+
+
+tasks.register('generateSkeuoIcons', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'python3', 'tools/generate_icons.py'
+}
+
+preBuild.dependsOn generateSkeuoIcons
