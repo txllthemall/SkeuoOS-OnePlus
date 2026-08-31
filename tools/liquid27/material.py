@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageEnhance
 import math
 
 # Apple documents a 1024x1024 iPhone/iPad/Mac icon canvas. We author in that
-# coordinate space, rasterize at 1536x1536, then Lanczos-bake to the 512px Android asset.
+# coordinate space and bake to the 512px Android asset with Lanczos.
 DESIGN = 1024.0
-WORK = 1536
+WORK = 1024
 OUT = 512
 K = WORK / DESIGN
 C = DESIGN / 2
@@ -80,6 +80,26 @@ def arc(box, start, end, width):
     return m
 
 
+def round_line(points, width):
+    m = line(points, width)
+    r = width / 2
+    d = ImageDraw.Draw(m)
+    for x, y in (points[0], points[-1]):
+        d.ellipse(sbox((x-r, y-r, x+r, y+r)), fill=255)
+    return m
+
+
+def bezier(p0, p1, p2, p3, width, steps=64):
+    pts = []
+    for i in range(steps + 1):
+        t = i / steps
+        u = 1 - t
+        x = u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0]
+        y = u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1]
+        pts.append((x, y))
+    return round_line(pts, width)
+
+
 def union(*masks):
     out = blank_mask()
     for m in masks:
@@ -108,24 +128,8 @@ def rotate(mask, degrees, center=(C, C)):
     return mask.rotate(degrees, center=(sx(center[0]), sx(center[1])), resample=Image.Resampling.BICUBIC)
 
 
-def scale_mask(mask, factor, center=(C, C)):
-    if abs(factor - 1.0) < 1e-6:
-        return mask
-    if not mask.getbbox():
-        return mask
-    cx, cy = sx(center[0]), sx(center[1])
-    w = max(1, int(WORK * factor)); h = max(1, int(WORK * factor))
-    scaled = mask.resize((w, h), Image.Resampling.BICUBIC)
-    out = blank_mask(); x = cx - w // 2; y = cy - h // 2
-    if w <= WORK and h <= WORK:
-        out.paste(scaled, (x, y))
-    else:
-        out = scaled.crop((-x, -y, -x + WORK, -y + WORK))
-    return out
-
-
-# The system normally applies the enclosure mask. Android needs a flattened crop.
-# This is deliberately not a decorative border, chrome ring, or baked bevel.
+# The system applies the enclosure dynamically. Android cannot, so this is only
+# the final crop, not a decorative frame.
 ENCL = rr((0, 0, 1024, 1024), 228)
 
 
@@ -138,12 +142,12 @@ def _vertical_gradient(colors):
     half = WORK // 2
     top = ImageOps.colorize(Image.linear_gradient('L').resize((WORK, half)), colors[0], colors[1]).convert('RGBA')
     bottom = ImageOps.colorize(Image.linear_gradient('L').resize((WORK, WORK-half)), colors[1], colors[-1]).convert('RGBA')
-    im = Image.new('RGBA', (WORK, WORK), (0,0,0,0)); im.paste(top, (0,0)); im.paste(bottom, (0,half))
+    im = Image.new('RGBA', (WORK, WORK), (0,0,0,0))
+    im.paste(top, (0,0)); im.paste(bottom, (0,half))
     return im
 
 
 def _ambient_pools(im):
-    # Broad, low-amplitude lighting changes field density without drawing a frame.
     glow = Image.radial_gradient('L').resize((int(WORK*.95), int(WORK*.95)), Image.Resampling.BICUBIC)
     glow = ImageOps.invert(glow).point(lambda v: int(v*.055))
     gm = Image.new('L', (WORK,WORK), 0); gm.paste(glow, (-int(WORK*.18), -int(WORK*.28)))
@@ -160,31 +164,73 @@ def background(spec):
     cols = spec.get('colors') or [spec.get('color', '#7a7a80')]
     im = _vertical_gradient(cols)
     if kind == 'radial' and len(cols) > 1:
-        pm = Image.new('L', (WORK,WORK), 0); d = ImageDraw.Draw(pm)
+        pm = Image.new('L', (WORK,WORK), 0)
+        d = ImageDraw.Draw(pm)
         d.ellipse((int(WORK*.42), -int(WORK*.10), int(WORK*1.08), int(WORK*.58)), fill=128)
         pm = pm.filter(ImageFilter.GaussianBlur(int(WORK*.14)))
         tint = Image.new('RGBA', (WORK,WORK), (*rgb(cols[-1]), 0)); tint.putalpha(pm); im.alpha_composite(tint)
-    im = _ambient_pools(im); im.putalpha(ENCL)
+    im = _ambient_pools(im)
+    im.putalpha(ENCL)
     return im
 
 
+def _max_filter(mask, px):
+    n = max(3, sx(px) * 2 + 1)
+    if n % 2 == 0: n += 1
+    return mask.filter(ImageFilter.MaxFilter(n))
+
+
+def _min_filter(mask, px):
+    n = max(3, sx(px) * 2 + 1)
+    if n % 2 == 0: n += 1
+    return mask.filter(ImageFilter.MinFilter(n))
+
+
+def inner_edge(mask, px=2.2):
+    return sub(mask, _min_filter(mask, px))
+
+
+def outer_edge(mask, px=2.0):
+    return sub(_max_filter(mask, px), mask)
+
+
+def top_facing_edge(mask, px=2.2):
+    return sub(mask, shifted(mask, 0, px))
+
+
+def bottom_facing_edge(mask, px=1.5):
+    return sub(mask, shifted(mask, 0, -px))
+
+
+def _vertical_weight(top=True):
+    g = Image.linear_gradient('L').resize((WORK, WORK))
+    return ImageOps.invert(g) if top else g
+
+
 def finish_enclosure(canvas):
-    """Subtle system-like enclosure lighting. No stroke, bevel, or chrome."""
-    grad = ImageOps.invert(Image.linear_gradient('L').resize((WORK,WORK)))
-    grad = grad.point(lambda v: int((v/255.0)**3 * 18)); grad = inter(grad, ENCL)
+    # Static approximation of the system enclosure: directional material response,
+    # not a visible chrome/metal border.
+    grad = Image.linear_gradient('L').resize((WORK, WORK))
+    grad = ImageOps.invert(grad).point(lambda v: int((v/255.0)**3 * 20))
+    grad = inter(grad, ENCL)
     white = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); white.putalpha(grad); canvas.alpha_composite(white)
-    lo = Image.linear_gradient('L').resize((WORK,WORK)).point(lambda v: int((v/255.0)**3 * 12)); lo = inter(lo, ENCL)
-    black = Image.new('RGBA', (WORK,WORK), (0,0,0,0)); black.putalpha(lo); canvas.alpha_composite(black)
+    top = inter(top_facing_edge(ENCL, 3.6), _vertical_weight(True)).point(lambda v: int(v*.34))
+    hi = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); hi.putalpha(top); canvas.alpha_composite(hi)
+    lo_field = Image.linear_gradient('L').resize((WORK,WORK)).point(lambda v: int((v/255.0)**3 * 13))
+    lo_field = inter(lo_field, ENCL)
+    black = Image.new('RGBA', (WORK,WORK), (0,0,0,0)); black.putalpha(lo_field); canvas.alpha_composite(black)
+    low = inter(bottom_facing_edge(ENCL, 2.3), _vertical_weight(False)).point(lambda v: int(v*.10))
+    dk = Image.new('RGBA', (WORK,WORK), (0,0,0,0)); dk.putalpha(low); canvas.alpha_composite(dk)
     canvas.putalpha(ENCL)
 
 
 def _lens_refract(under, mask, strength=.045, offset=(0,0), blur=0):
-    """Static lens bake using pixels already composited beneath this layer."""
     bb = mask.getbbox()
     if not bb or strength <= 0:
         out = under.copy(); out.putalpha(mask); return out
     cx = (bb[0]+bb[2])/2; cy = (bb[1]+bb[3])/2
-    scale = 1.0 + min(.18, max(0.0, strength)); a = 1/scale; e = 1/scale
+    scale = 1.0 + min(.18, max(0.0, strength))
+    a = 1/scale; e = 1/scale
     c = cx - cx*a - sx(offset[0]); f = cy - cy*e - sx(offset[1])
     refr = under.transform((WORK,WORK), Image.Transform.AFFINE, (a,0,c,0,e,f), resample=Image.Resampling.BICUBIC)
     if blur: refr = refr.filter(ImageFilter.GaussianBlur(max(.1, sx(blur))))
@@ -192,65 +238,72 @@ def _lens_refract(under, mask, strength=.045, offset=(0,0), blur=0):
     return refr
 
 
-def _max_filter(mask, px):
-    n = max(3, sx(px)*2+1); n = n if n%2 else n+1
-    return mask.filter(ImageFilter.MaxFilter(n))
-
-
-def _min_filter(mask, px):
-    n = max(3, sx(px)*2+1); n = n if n%2 else n+1
-    return mask.filter(ImageFilter.MinFilter(n))
-
-
-def inner_edge(mask, px=2.2): return sub(mask, _min_filter(mask, px))
-def outer_edge(mask, px=2.0): return sub(_max_filter(mask, px), mask)
-def top_facing_edge(mask, px=2.2): return sub(mask, shifted(mask, 0, px))
-def bottom_facing_edge(mask, px=1.5): return sub(mask, shifted(mask, 0, -px))
-
-def _vertical_weight(top=True):
-    g = Image.linear_gradient('L').resize((WORK,WORK)); return ImageOps.invert(g) if top else g
-
-
 def _apply_blend(canvas, layer, mode):
     alpha = layer.getchannel('A')
-    if mode == 'screen': canvas.paste(ImageChops.screen(canvas, layer), (0,0), alpha)
-    elif mode == 'multiply': canvas.paste(ImageChops.multiply(canvas, layer), (0,0), alpha)
-    elif mode == 'plus_lighter': canvas.paste(ImageChops.add(canvas, layer, scale=1.0, offset=0), (0,0), alpha)
-    elif mode == 'plus_darker':
-        inv = ImageChops.invert(ImageChops.add(ImageChops.invert(canvas.convert('RGB')), ImageChops.invert(layer.convert('RGB'))).convert('RGB')).convert('RGBA'); inv.putalpha(alpha); canvas.alpha_composite(inv)
-    else: canvas.alpha_composite(layer)
+    if mode == 'screen':
+        canvas.paste(ImageChops.screen(canvas, layer), (0,0), alpha)
+    elif mode == 'multiply':
+        canvas.paste(ImageChops.multiply(canvas, layer), (0,0), alpha)
+    elif mode == 'plus_lighter':
+        canvas.paste(ImageChops.add(canvas, layer, scale=1.0, offset=0), (0,0), alpha)
+    else:
+        canvas.alpha_composite(layer)
 
 
-def composite_layer(canvas, mask, *, fill='#ffffff', material='glass', opacity=.88,
-                    refraction=.045, refract_offset=(0,0), blur=0, specular='automatic',
-                    shadow=.05, blend='normal', shadow_offset=3.0, shadow_blur=7.0):
+def _surface_sheen(mask, strength=.18):
+    y = Image.linear_gradient('L').resize((WORK,WORK))
+    y = ImageOps.invert(y).point(lambda v: int(((v/255.0)**2.4) * 255 * strength))
+    return inter(mask, y).filter(ImageFilter.GaussianBlur(max(1, sx(1.0))))
+
+
+def composite_layer(canvas, mask, *, fill='#ffffff', material='glass', opacity=.78,
+                    refraction=.065, refract_offset=(0,0), blur=0, specular='automatic',
+                    shadow=.035, blend='normal', shadow_offset=2.0, shadow_blur=5.0):
     under = canvas.copy()
+    color = rgb(fill)
     if shadow and material != 'ink':
         sm = shifted(mask, 0, shadow_offset).filter(ImageFilter.GaussianBlur(max(1, sx(shadow_blur))))
-        sm = sm.point(lambda v: int(v*min(.18, shadow)))
+        sm = sm.point(lambda v: int(v * min(.11, shadow)))
         black = Image.new('RGBA', (WORK,WORK), (0,0,0,255)); black.putalpha(sm); canvas.alpha_composite(black)
 
-    layer_img = Image.new('RGBA', (WORK,WORK), (0,0,0,0)); color = rgb(fill)
+    layer_img = Image.new('RGBA', (WORK,WORK), (0,0,0,0))
     if material == 'glass':
-        layer_img.alpha_composite(_lens_refract(under, mask, refraction, refract_offset, blur))
-        # Near-white layers stay visibly glassy rather than becoming opaque stickers.
-        eff_opacity = opacity * (.82 if luminance(color) >= 228 else 1.0)
-        tint_alpha = mask.point(lambda v: int(v*max(0.0, min(1.0, eff_opacity))))
-        tint = Image.new('RGBA', (WORK,WORK), (*color,0)); tint.putalpha(tint_alpha); layer_img.alpha_composite(tint)
+        refr = _lens_refract(under, mask, max(.02, refraction), refract_offset, blur)
+        refr = ImageEnhance.Contrast(refr).enhance(1.035)
+        refr = ImageEnhance.Color(refr).enhance(1.06)
+        layer_img.alpha_composite(refr)
+        if refraction > .02:
+            edge_band = inner_edge(mask, 10.0)
+            strong = _lens_refract(under, edge_band, min(.16, refraction*1.75), (refract_offset[0]-1.5, refract_offset[1]-1.0), blur)
+            strong = ImageEnhance.Contrast(strong).enhance(1.08)
+            strong = ImageEnhance.Color(strong).enhance(1.12)
+            strong.putalpha(edge_band.point(lambda v: int(v*.72)))
+            layer_img.alpha_composite(strong)
+
+        luma = luminance(color)
+        material_alpha = opacity * (.46 if luma >= 228 else .62)
+        material_alpha = max(.24, min(.76, material_alpha))
+        tint = Image.new('RGBA', (WORK,WORK), (*color,0)); tint.putalpha(mask.point(lambda v: int(v*material_alpha))); layer_img.alpha_composite(tint)
+        sheen = _surface_sheen(mask, .115 if luma > 210 else .085)
+        white = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); white.putalpha(sheen); layer_img.alpha_composite(white)
+
         mode = specular
-        if mode == 'automatic': mode = 'inside' if luminance(color) >= 135 else 'outside'
+        if mode == 'automatic': mode = 'inside' if luma >= 150 else 'outside'
         if mode != 'off':
-            edge = top_facing_edge(mask, 2.1) if mode == 'inside' else outer_edge(mask, 1.8)
-            edge = inter(edge, _vertical_weight(True)).point(lambda v: int(v*.88))
+            edge = top_facing_edge(mask, 3.8) if mode == 'inside' else outer_edge(mask, 2.6)
+            edge = inter(edge, _vertical_weight(True)).point(lambda v: int(v * (.92 if luma > 180 else .78)))
             hi = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); hi.putalpha(edge); layer_img.alpha_composite(hi)
-            low = inter(bottom_facing_edge(mask, 1.1), _vertical_weight(False)).point(lambda v: int(v*.16))
+            rim = inter(inner_edge(mask, 2.1), _vertical_weight(True)).point(lambda v: int(v*.42))
+            rim_color = mix(color, (255,255,255), .58)
+            ri = Image.new('RGBA', (WORK,WORK), (*rim_color,0)); ri.putalpha(rim); layer_img.alpha_composite(ri)
+            hair = outer_edge(mask, 1.1).point(lambda v: int(v*.26))
+            hc = mix(color, (255,255,255), .46)
+            ho = Image.new('RGBA', (WORK,WORK), (*hc,0)); ho.putalpha(hair); layer_img.alpha_composite(ho)
+            low = inter(bottom_facing_edge(mask, 2.0), _vertical_weight(False)).point(lambda v: int(v*.17))
             dk = Image.new('RGBA', (WORK,WORK), (0,0,0,0)); dk.putalpha(low); layer_img.alpha_composite(dk)
-    elif material in ('solid','ink'):
-        alpha = mask.point(lambda v: int(v*max(0.0, min(1.0, opacity))))
+    else:
+        alpha = mask.point(lambda v: int(v * max(.0, min(1.0, opacity))))
         tint = Image.new('RGBA', (WORK,WORK), (*color,0)); tint.putalpha(alpha); layer_img.alpha_composite(tint)
-        if material == 'solid' and specular != 'off':
-            hi = inter(top_facing_edge(mask, 1.5), _vertical_weight(True)).point(lambda v: int(v*.30))
-            white = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); white.putalpha(hi); layer_img.alpha_composite(white)
     _apply_blend(canvas, layer_img, blend)
 
 
@@ -258,13 +311,12 @@ def text_mask(text, size=260, yoff=0, bold=True):
     font = ImageFont.truetype(FONT_BOLD if bold else FONT_REG, sx(size))
     m = blank_mask(); d = ImageDraw.Draw(m); box = d.textbbox((0,0), text, font=font)
     x = (WORK-(box[2]-box[0]))/2-box[0]; y = (WORK-(box[3]-box[1]))/2-box[1]+sx(yoff)
-    d.text((x,y), text, font=font, fill=255); return m
+    d.text((x,y), text, font=font, fill=255)
+    return m
 
 
-def layer(mask, fill='#fff', opacity=.88, refraction=.045, specular='automatic',
-          shadow=.05, material='glass', blend='normal', offset=(0,0), blur=0,
-          shadow_offset=3.0, shadow_blur=7.0):
-    return dict(mask=mask, fill=fill, opacity=opacity, refraction=refraction,
-                specular=specular, shadow=shadow, material=material, blend=blend,
-                refract_offset=offset, blur=blur, shadow_offset=shadow_offset,
-                shadow_blur=shadow_blur)
+def layer(mask, fill='#fff', opacity=.88, refraction=.045, specular='automatic', shadow=.05,
+          material='glass', blend='normal', offset=(0,0), blur=0, shadow_offset=3.0, shadow_blur=7.0):
+    return dict(mask=mask, fill=fill, opacity=opacity, refraction=refraction, specular=specular,
+                shadow=shadow, material=material, blend=blend, refract_offset=offset, blur=blur,
+                shadow_offset=shadow_offset, shadow_blur=shadow_blur)
