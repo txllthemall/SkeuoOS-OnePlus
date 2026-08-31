@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, v4-liquid27 ]
   pull_request:
   workflow_dispatch:
 
@@ -22,18 +22,24 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Install icon tooling
-        run: python3 -m pip install --disable-pip-version-check Pillow==11.3.0
-      - name: Generate Liquid27 icons
+        run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
+      - name: Generate Liquid27 v4 icons
         run: python3 tools/generate_liquid27.py
+      - name: Liquid27 visual QA
+        run: python3 tools/qa_liquid27.py
       - name: Verify pack
         run: python3 tools/check_pack.py
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
-      - name: Upload APK and preview
+      - name: Upload APK and previews
         uses: actions/upload-artifact@v4
         with:
-          name: SkeuoOS-OnePlus-v3.0.0
+          name: SkeuoOS-OnePlus-v4.0.0
           path: |
             app/build/outputs/apk/debug/app-debug.apk
-            build/liquid27-preview.png
+            build/liquid27-v4/preview_full.png
+            build/liquid27-v4/preview_home.png
+            build/liquid27-v4/preview_wallpaper.png
+            build/liquid27-v4/qa.tsv
+            DESIGN_NOTES.md
           if-no-files-found: error
