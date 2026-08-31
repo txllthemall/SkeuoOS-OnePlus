@@ -12,7 +12,11 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 
-from PIL import Image
+from PIL import Image, ImageFile
+
+# A chunk of the upstream collection contains valid-looking PNGs with truncated
+# streams. Pillow can recover most of them safely enough for icon use.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 ROOT = Path(__file__).resolve().parents[1]
 DRAWABLE = ROOT / "app/src/main/res/drawable-nodpi"
@@ -33,8 +37,6 @@ TOP_LEVEL_DIRS = {
     "iPhone & iPod touch",
 }
 
-# Prefer these folders when choosing a source image to replace one of the
-# automatic SkeuoOS mappings. Everything is still kept in the manual picker.
 CATEGORY_SCORE = {
     "iPhone & iPod touch": 40,
     "Apple icons": 35,
@@ -95,7 +97,6 @@ def ascii_slug(text: str) -> str:
 
 def canonical_name(text: str) -> str:
     s = ascii_slug(text).replace("_", " ")
-    # Resolution/device suffixes should not stop canonical matching.
     noise = [
         "itunes artwork", "app icon", "icon", "2x", "3x",
         "iphone", "ipad", "ipod touch", "retina", "cropped",
@@ -150,7 +151,6 @@ def score_overlay(record: dict, aliases: list[str]) -> int:
             score += 140
         elif alias in name:
             score += 80
-    # Prefer reasonably large original source art when names tie.
     score += min(record["source_pixels"] // 10000, 25)
     return score
 
@@ -158,8 +158,6 @@ def score_overlay(record: dict, aliases: list[str]) -> int:
 def update_catalog(records_by_category: dict[str, list[dict]]) -> None:
     tree = ET.parse(ASSET_CATALOG)
     root = tree.getroot()
-
-    # Make repeated CI runs idempotent.
     for child in list(root):
         if child.tag == "item" and child.attrib.get("drawable", "").startswith("ios6_"):
             root.remove(child)
@@ -187,13 +185,10 @@ def main() -> None:
             if info.is_dir():
                 continue
             path = PurePosixPath(info.filename)
-            # Archive layout is iOS-6-Icons-main/<top dir>/<file>.
             if len(path.parts) < 3:
                 continue
             category = path.parts[1]
-            if category not in TOP_LEVEL_DIRS:
-                continue
-            if path.suffix.lower() not in VALID_EXTS:
+            if category not in TOP_LEVEL_DIRS or path.suffix.lower() not in VALID_EXTS:
                 continue
 
             rel = PurePosixPath(*path.parts[1:])
@@ -208,17 +203,15 @@ def main() -> None:
                 failures.append({"source": str(rel), "error": str(exc)})
                 continue
 
-            records.append(
-                {
-                    "source": str(rel),
-                    "category": category,
-                    "resource": resource,
-                    "canonical": canonical_name(rel.stem),
-                    "source_size": source_size,
-                    "source_pixels": source_size[0] * source_size[1],
-                    "final_size": final_size,
-                }
-            )
+            records.append({
+                "source": str(rel),
+                "category": category,
+                "resource": resource,
+                "canonical": canonical_name(rel.stem),
+                "source_size": source_size,
+                "source_pixels": source_size[0] * source_size[1],
+                "final_size": final_size,
+            })
 
     by_category: dict[str, list[dict]] = {}
     for record in records:
