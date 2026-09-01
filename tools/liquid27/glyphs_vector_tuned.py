@@ -10,6 +10,11 @@ from .glyphs_vector import (
     CHATGPT_ARM_D,
 )
 
+# Production ownership is explicit in geometry.py. These are the reviewed
+# launcher-scale overrides; they are not fallbacks and never depend on import
+# order.
+TUNED_KINDS = {'camera', 'telegram', 'discord', 'youtube', 'spotify', 'chatgpt'}
+
 
 def gl(mask, fill='#fff', opacity=.84, refraction=.085, specular='outside', shadow=.020,
        material='glass', blend='normal', offset=(0, -2)):
@@ -17,11 +22,11 @@ def gl(mask, fill='#fff', opacity=.84, refraction=.085, specular='outside', shad
 
 
 def glyph_vector_tuned(kind):
-    """Second-pass optical tuning after reviewing the CI Home Screen preview."""
+    """Launcher-scale vector geometry that has explicit optical corrections."""
+    if kind not in TUNED_KINDS:
+        return None
 
     if kind == 'camera':
-        # Bootstrap source bounds are 0..16 x 2..14.  Use a tighter source box
-        # so the camera fills the icon's optical safe area instead of floating.
         body = path_mask(CAMERA_BODY_D, viewbox=(0, 1.5, 16, 13), target=(120, 190, 904, 836))
         return [
             gl(body, '#f7f8fa', .84, .065, 'inside', .018),
@@ -31,12 +36,13 @@ def glyph_vector_tuned(kind):
         ]
 
     if kind == 'telegram':
-        # The plane occupies only x=125..357 / y=170..362 of the 512 source.
-        # Crop to the actual silhouette before fitting it to the safe area.
+        # The paper plane is intrinsically right-heavy. A mathematical bbox
+        # center looks visibly right-shifted at 48-64 px, so the source-vector
+        # fit is moved left before Cairo rasterization (not after rasterization).
         plane = path_mask(
             TELEGRAM_PLANE_D,
             viewbox=(112, 157, 258, 218),
-            target=(175, 215, 849, 815),
+            target=(105, 205, 795, 820),
         )
         return [gl(plane, '#fff', .88, .105, 'outside', .018)]
 
@@ -58,8 +64,6 @@ def glyph_vector_tuned(kind):
         return [gl(logo, '#fff', .88, .094, 'outside', .018)]
 
     if kind == 'spotify':
-        # Keep the mark open (no fake black circle), but give the three curves
-        # the same visual weight as the other launcher-scale glyphs.
         p1 = stroked_path_mask('M258 382 C385 327 574 342 758 408', width=54)
         p2 = stroked_path_mask('M292 505 C412 458 575 470 724 528', width=48)
         p3 = stroked_path_mask('M333 624 C436 584 562 590 684 638', width=42)
@@ -81,4 +85,4 @@ def glyph_vector_tuned(kind):
         )
         return [gl(logo, '#f2faf6', .76, .110, 'outside', .008, blend='plus_lighter')]
 
-    return None
+    raise AssertionError(f'Unhandled tuned kind: {kind}')
