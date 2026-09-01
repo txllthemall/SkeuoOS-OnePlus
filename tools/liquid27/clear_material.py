@@ -47,8 +47,6 @@ def _bottom_weight(power: float = 1.0) -> Image.Image:
 
 @lru_cache(maxsize=4)
 def _horizontal_weight(left: bool) -> Image.Image:
-    # A smooth side weight, not a painted blob. It only selects which part of
-    # the real curved edge catches a weak environment reflection.
     g = Image.linear_gradient('L').resize((WORK, WORK)).rotate(90, expand=False)
     return ImageOps.invert(g) if left else g
 
@@ -65,11 +63,7 @@ def reflection_style(key: str) -> int:
 
 @lru_cache(maxsize=256)
 def clear_reflection_mask(key: str) -> Image.Image:
-    """Environmental response derived only from the enclosure edge.
-
-    There are no ellipses, crescents, ribbons or interior highlight patches.
-    This is intentionally much weaker than the physically consistent specular.
-    """
+    """Environmental response derived only from the real enclosure edge."""
     style = reflection_style(key)
     if style == 0:
         return blank_mask()
@@ -92,8 +86,8 @@ def _soft_inner_band(mask: Image.Image, edge_px: int, blur_px: int) -> Image.Ima
 
 @lru_cache(maxsize=1)
 def _enclosure_density() -> Image.Image:
-    # The centre is nearly clear. Optical thickness grows smoothly near the
-    # rounded edge; this replaces the old uniform grey plate.
+    # Centre is nearly clear; material presence comes from optical thickness at
+    # curved edges rather than a uniform grey plate.
     density = Image.new('L', (WORK, WORK), 5)
     wide = _soft_inner_band(ENCL, 7, 20).point(lambda v: int(v * .075))
     tight = _soft_inner_band(ENCL, 2, 4).point(lambda v: int(v * .075))
@@ -105,7 +99,6 @@ def _enclosure_density() -> Image.Image:
 
 
 def _glyph_density(source_mask: Image.Image) -> Image.Image:
-    # Foreground is a thicker glass layer than the enclosure, but not opaque ink.
     base = Image.new('L', (WORK, WORK), 206)
     top = _top_weight(2.0).point(lambda v: int(v * .025))
     edge = _soft_inner_band(source_mask, 5, 9).point(lambda v: int(v * .13))
@@ -118,20 +111,15 @@ def clearify_layers(layers, key: str):
     """Convert shared geometry into Clear material without decorative blobs."""
     result = []
     top_weight = _top_weight(.72)
-
     for src in layers:
         item = dict(src)
         source_mask = item['mask']
         source_luma = luminance(item.get('fill', '#ffffff'))
-
         item['mask'] = _glyph_density(source_mask)
         item['material'] = 'glass'
         item['fill'] = '#d6dde6' if source_luma < 145 else '#f3f6f8'
         item['opacity'] = .36 if source_luma < 145 else .42
         item['refraction'] = max(.094, min(.132, float(item.get('refraction', .06)) * 1.28))
-        # composite_layer's generic specular is intentionally disabled here;
-        # Clear uses the explicit shape-following catch below so there is only
-        # one physically coherent highlight path.
         item['specular'] = 'off'
         item['shadow'] = .0004
         item['blend'] = 'normal'
@@ -140,34 +128,27 @@ def clearify_layers(layers, key: str):
         item['shadow_blur'] = 1.0
         result.append(item)
 
-        catch = inter(top_facing_edge(source_mask, 1.5), top_weight)
-        catch = catch.point(lambda v: int(v * .22))
+        # Shape-following top catch: it inherits the glyph's actual edge, never
+        # an oval/ribbon overlay and never a copy-pasted reflection texture.
+        catch = inter(top_facing_edge(source_mask, 1.5), top_weight).point(lambda v: int(v * .22))
         if catch.getbbox():
-            result.append(layer(
-                catch, '#ffffff', .10, 0, 'off', 0,
-                'ink', 'screen', (0, 0), 0, 0, 0,
-            ))
-
+            result.append(layer(catch, '#ffffff', .10, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
     return result
 
 
 def clear_background(key: str) -> Image.Image:
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
-
     neutral = Image.new('RGBA', (WORK, WORK), (226, 232, 239, 0))
     neutral.putalpha(_enclosure_density())
     canvas.alpha_composite(neutral)
 
-    # Environmental reflection is optional and edge-derived. Most icons have none.
     reflection = clear_reflection_mask(key)
     if reflection.getbbox():
         white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
         white.putalpha(reflection)
         canvas.alpha_composite(white)
 
-    # Directional top-light specular tied to the actual enclosure curvature.
-    top_edge = inter(top_facing_edge(ENCL, 2.0), _top_weight(.55))
-    top_edge = top_edge.point(lambda v: int(v * .24))
+    top_edge = inter(top_facing_edge(ENCL, 2.0), _top_weight(.55)).point(lambda v: int(v * .24))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
@@ -187,12 +168,8 @@ def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
     canvas.putalpha(inter(canvas.getchannel('A'), ENCL))
 
 
-# ----------------------------- preview optics -----------------------------
-# A static Android PNG cannot read the launcher's wallpaper. Preview rendering
-# can, so it uses an actual wallpaper-dependent displacement field to validate
-# the optical design instead of pretending the APK has runtime refraction.
-
-
+# Preview-only real background displacement. Static Android PNG assets cannot
+# access the launcher's wallpaper at runtime; DESIGN_NOTES documents this limit.
 def _bilinear_warp(rgb: np.ndarray, dx: np.ndarray, dy: np.ndarray) -> np.ndarray:
     h, w = rgb.shape[:2]
     yy, xx = np.indices((h, w), dtype=np.float32)
@@ -214,37 +191,27 @@ def _enclosure_displacement(size: int, strength: float = 4.2):
     c = (size - 1) / 2.0
     xn = (xx - c) / max(c, 1.0)
     yn = (yy - c) / max(c, 1.0)
-    # Superellipse approximates a rounded-square lens more faithfully than a
-    # radial fisheye. Centre remains calm; curvature rises only near the edge.
     q = (np.abs(xn) ** 4 + np.abs(yn) ** 4) ** .25
     edge = np.clip((q - .50) / .50, 0.0, 1.0) ** 2.35
-    dx = xn * edge * strength
-    dy = yn * edge * strength * .88
-    return dx, dy
+    return xn * edge * strength, yn * edge * strength * .88
 
 
 def _mask_gradient_displacement(mask: Image.Image, size: int, strength: float = 2.4):
-    m = mask.resize((size, size), Image.Resampling.LANCZOS).filter(
-        ImageFilter.GaussianBlur(max(1.0, size * .010))
-    )
+    m = mask.resize((size, size), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(max(1.0, size * .010)))
     a = np.asarray(m, dtype=np.float32) / 255.0
     gy, gx = np.gradient(a)
     mag = np.sqrt(gx * gx + gy * gy)
     denom = np.maximum(mag, 1e-4)
     edge = np.clip(mag * size * .26, 0.0, 1.0)
-    dx = (gx / denom) * edge * strength
-    dy = (gy / denom) * edge * strength
-    return dx, dy, a
+    return (gx / denom) * edge * strength, (gy / denom) * edge * strength, a
 
 
 def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | None = None) -> Image.Image:
-    """Return the real wallpaper patch after passing through preview glass."""
     base = under.convert('RGB')
-    arr = np.asarray(base, dtype=np.float32)
-    size = base.size[0]
     if base.size[0] != base.size[1]:
         raise ValueError('preview refraction expects a square wallpaper patch')
-
+    arr = np.asarray(base, dtype=np.float32)
+    size = base.size[0]
     dx, dy = _enclosure_displacement(size)
     warped = _bilinear_warp(arr, dx, dy)
     encl = ENCL.resize(base.size, Image.Resampling.LANCZOS)
@@ -254,27 +221,34 @@ def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | Non
         dx2, dy2, alpha = _mask_gradient_displacement(foreground_mask, size)
         arr2 = np.asarray(result, dtype=np.float32)
         warped2 = _bilinear_warp(arr2, dx2, dy2)
-        # Only a partial replacement is needed; full replacement overstates the
-        # glass deformation at launcher scale.
         mixed = (arr2 * .55 + warped2.astype(np.float32) * .45).astype(np.uint8)
         fm = Image.fromarray(np.clip(alpha * 255, 0, 255).astype(np.uint8), 'L')
         result = Image.composite(Image.fromarray(mixed, 'RGB'), result, fm)
     return result
 
 
-def material_metrics(key: str) -> dict:
+@lru_cache(maxsize=1)
+def _metric_base():
+    """Expensive morphology is shared by every icon, never recomputed per row."""
     density = np.asarray(_enclosure_density(), dtype=np.float32)
     yy, xx = np.indices(density.shape)
     centre = (np.abs(xx - WORK / 2) < WORK * .20) & (np.abs(yy - WORK / 2) < WORK * .20)
-    edge = np.asarray(inner_edge(ENCL, 20), dtype=np.uint8) > 0
+    # A 6 px band is enough to characterize edge density and avoids the old
+    # pathological 41x41 MinFilter repeated for every icon.
+    edge_mask = np.asarray(inner_edge(ENCL, 6), dtype=np.uint8) > 0
     top_spec = np.asarray(inter(top_facing_edge(ENCL, 2.0), _top_weight(.55)), dtype=np.uint8)
     dx, dy = _enclosure_displacement(128)
     disp = np.sqrt(dx * dx + dy * dy)
     return {
         'enclosure_center_density': float(density[centre].mean()),
-        'enclosure_edge_density': float(density[edge].mean()) if edge.any() else 0.0,
+        'enclosure_edge_density': float(density[edge_mask].mean()) if edge_mask.any() else 0.0,
         'specular_coverage_pct': float((top_spec > 12).mean() * 100.0),
-        'reflection_coverage_pct': clear_reflection_coverage_pct(key),
         'refraction_displacement_mean': float(disp.mean()),
         'refraction_displacement_max': float(disp.max()),
     }
+
+
+def material_metrics(key: str) -> dict:
+    result = dict(_metric_base())
+    result['reflection_coverage_pct'] = clear_reflection_coverage_pct(key)
+    return result
