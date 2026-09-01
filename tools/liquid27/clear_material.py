@@ -60,6 +60,12 @@ def _diagonal_light(left: bool = True) -> Image.Image:
     return Image.fromarray(np.round(field * 255).astype(np.uint8), 'L')
 
 
+@lru_cache(maxsize=1)
+def _broad_surface_band() -> Image.Image:
+    """Large morphology is geometry-only and must be computed once, not per icon."""
+    return inner_edge(ENCL, 42).filter(ImageFilter.GaussianBlur(28))
+
+
 def reflection_style(key: str) -> int:
     """Every icon reflects; style only changes direction/intensity, never material presence."""
     return 2 if (_seed(key, 401) % 10) >= 7 else 1
@@ -76,10 +82,9 @@ def clear_reflection_mask(key: str) -> Image.Image:
     edge = edge.filter(ImageFilter.GaussianBlur(1.5 if style == 1 else 2.1))
     edge = inter(edge, field).point(lambda v: int(v * (.24 if style == 1 else .33)))
 
-    # A broad, extremely faint surface catch is what makes the tile read as a
-    # continuous curved sheet instead of only a stroked rounded rectangle.
-    broad = inner_edge(ENCL, 42).filter(ImageFilter.GaussianBlur(28))
-    broad = inter(broad, field).point(lambda v: int(v * (.030 if style == 1 else .045)))
+    # Broad but extremely faint response across the curved surface. The expensive
+    # 42 px morphology is cached globally above; only directional weighting varies.
+    broad = inter(_broad_surface_band(), field).point(lambda v: int(v * (.030 if style == 1 else .045)))
     return ImageChops.lighter(edge, broad)
 
 
