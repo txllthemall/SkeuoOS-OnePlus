@@ -23,9 +23,9 @@ jobs:
           gradle-version: '8.13'
       - name: Install icon tooling
         run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
-      - name: Generate Color and enhanced Clear Liquid27 resources
-        run: python3 tools/generate_liquid27_v41.py --variant all
-      - name: Liquid27 visual QA
+      - name: Generate Color and Clear Liquid27 resources
+        run: python3 tools/generate_liquid27.py --variant all
+      - name: Liquid27 visual and geometry QA
         run: python3 tools/qa_liquid27.py --variant all
       - name: Verify both packs
         run: python3 tools/check_pack.py
@@ -38,11 +38,13 @@ jobs:
           path: |
             app/build/outputs/apk/color/debug/app-color-debug.apk
             app/build/outputs/apk/clear/debug/app-clear-debug.apk
+            build/liquid27-v4/color/preview_geometry_focus.png
             build/liquid27-v4/color/preview_vector_reference.png
             build/liquid27-v4/color/preview_full.png
             build/liquid27-v4/color/preview_home.png
             build/liquid27-v4/color/preview_wallpaper.png
             build/liquid27-v4/color/qa.tsv
+            build/liquid27-v4/clear/preview_geometry_focus.png
             build/liquid27-v4/clear/preview_vector_reference.png
             build/liquid27-v4/clear/preview_full.png
             build/liquid27-v4/clear/preview_home.png
