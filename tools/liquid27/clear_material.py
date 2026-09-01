@@ -108,7 +108,7 @@ def _glyph_density(source_mask: Image.Image) -> Image.Image:
 
 
 def clearify_layers(layers, key: str):
-    """Convert shared geometry into Clear material without decorative blobs."""
+    """Convert shared geometry into colorless Clear material without decorative blobs."""
     result = []
     top_weight = _top_weight(.72)
     for src in layers:
@@ -117,7 +117,9 @@ def clearify_layers(layers, key: str):
         source_luma = luminance(item.get('fill', '#ffffff'))
         item['mask'] = _glyph_density(source_mask)
         item['material'] = 'glass'
-        item['fill'] = '#d6dde6' if source_luma < 145 else '#f3f6f8'
+        # Keep the Clear glyph intrinsically neutral. Any perceived hue should
+        # come from the wallpaper seen through the material, never a cyan tint.
+        item['fill'] = '#e2e2e2' if source_luma < 145 else '#f4f4f4'
         item['opacity'] = .36 if source_luma < 145 else .42
         item['refraction'] = max(.094, min(.132, float(item.get('refraction', .06)) * 1.28))
         item['specular'] = 'off'
@@ -138,7 +140,8 @@ def clearify_layers(layers, key: str):
 
 def clear_background(key: str) -> Image.Image:
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
-    neutral = Image.new('RGBA', (WORK, WORK), (226, 232, 239, 0))
+    # Neutral equal-channel veil: no intrinsic blue/green bias.
+    neutral = Image.new('RGBA', (WORK, WORK), (232, 232, 232, 0))
     neutral.putalpha(_enclosure_density())
     canvas.alpha_composite(neutral)
 
@@ -154,7 +157,7 @@ def clear_background(key: str) -> Image.Image:
     canvas.alpha_composite(hi)
 
     low_edge = inter(bottom_facing_edge(ENCL, 1.1), _bottom_weight(1.5)).point(lambda v: int(v * .018))
-    shade = Image.new('RGBA', (WORK, WORK), (42, 49, 60, 0))
+    shade = Image.new('RGBA', (WORK, WORK), (48, 48, 48, 0))
     shade.putalpha(low_edge)
     canvas.alpha_composite(shade)
     return canvas
