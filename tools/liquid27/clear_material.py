@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
@@ -27,6 +28,7 @@ def _clip(mask: Image.Image) -> Image.Image:
     return inter(mask, ENCL)
 
 
+@lru_cache(maxsize=16)
 def _top_weight(power: float = 1.0) -> Image.Image:
     g = ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK)))
     if power != 1.0:
@@ -34,6 +36,7 @@ def _top_weight(power: float = 1.0) -> Image.Image:
     return g
 
 
+@lru_cache(maxsize=16)
 def _bottom_weight(power: float = 1.0) -> Image.Image:
     g = Image.linear_gradient('L').resize((WORK, WORK))
     if power != 1.0:
@@ -53,8 +56,9 @@ def _soft_ellipse(cx: float, cy: float, rx: float, ry: float, *, angle: float = 
     return m
 
 
-def _crescent(key: str, salt: int = 0, *, strength: int = 255) -> Image.Image:
-    """Broad curved reflection, deliberately different per icon but deterministic."""
+@lru_cache(maxsize=512)
+def _crescent(key: str, salt: int = 0, strength: int = 255) -> Image.Image:
+    """Broad curved reflection, deterministic per icon."""
     s = _seed(key, salt)
     side = -1 if (s & 1) else 1
     cx = WORK * (0.72 if side > 0 else 0.28)
@@ -63,84 +67,82 @@ def _crescent(key: str, salt: int = 0, *, strength: int = 255) -> Image.Image:
     ry = WORK * (0.24 + ((s >> 17) & 15) / 15.0 * 0.06)
     angle = side * (18 + ((s >> 21) & 15))
 
-    outer = _soft_ellipse(cx, cy, rx, ry, angle=angle, blur=11, strength=strength)
+    outer = _soft_ellipse(cx, cy, rx, ry, angle=angle, blur=10, strength=strength)
     inner = _soft_ellipse(cx - side * WORK * .055, cy + WORK * .038,
-                          rx * .79, ry * .64, angle=angle, blur=16, strength=strength)
-    cres = ImageChops.subtract(outer, inner)
-    return _clip(cres)
+                          rx * .79, ry * .64, angle=angle, blur=14, strength=strength)
+    return _clip(ImageChops.subtract(outer, inner))
 
 
-def _streak(key: str, salt: int = 0, *, strength: int = 255) -> Image.Image:
-    """Narrow soft reflected light streak crossing only part of the surface."""
+@lru_cache(maxsize=512)
+def _streak(key: str, salt: int = 0, strength: int = 255) -> Image.Image:
+    """Narrow reflected-light streak crossing only part of the surface."""
     s = _seed(key, 100 + salt)
     y = WORK * (0.18 + ((s >> 5) & 63) / 63.0 * .34)
     x = WORK * (0.42 + ((s >> 12) & 31) / 31.0 * .20)
-    m = _soft_ellipse(x, y, WORK * .58, WORK * .045,
-                      angle=(-18 if s & 1 else 18), blur=18, strength=strength)
-    return _clip(m)
+    return _clip(_soft_ellipse(
+        x, y, WORK * .58, WORK * .045,
+        angle=(-18 if s & 1 else 18), blur=15, strength=strength,
+    ))
 
 
-def _variable_surface_field(key: str, salt: int = 0) -> Image.Image:
-    """Per-pixel material density: clear center, denser edges and reflection zones."""
-    # A low base density keeps the wallpaper visible.
-    field = Image.new('L', (WORK, WORK), 112)
+@lru_cache(maxsize=256)
+def _variable_surface_field(key: str) -> Image.Image:
+    """Shared optical field for an icon: clear plane + denser reflection zones."""
+    field = Image.new('L', (WORK, WORK), 108)
 
-    # The top is slightly milkier, but nowhere near a uniform frost overlay.
-    top = _top_weight(1.7).point(lambda v: int(v * .21))
+    top = _top_weight(1.7).point(lambda v: int(v * .18))
     field = ImageChops.add(field, top, scale=1.0, offset=0)
 
-    # Curved and streak reflections locally increase apparent material density.
-    cres = _crescent(key, salt, strength=170).point(lambda v: int(v * .55))
-    streak = _streak(key, salt, strength=150).point(lambda v: int(v * .38))
+    cres = _crescent(key, 17, 175).point(lambda v: int(v * .58))
+    streak = _streak(key, 17, 155).point(lambda v: int(v * .41))
     field = ImageChops.add(field, cres, scale=1.0, offset=0)
     field = ImageChops.add(field, streak, scale=1.0, offset=0)
 
-    # Edge density makes the lens readable while leaving the central plane clearer.
-    edge = inner_edge(ENCL, 18).filter(ImageFilter.GaussianBlur(7)).point(lambda v: int(v * .22))
+    # One cached edge field rather than recomputing it for every glyph layer.
+    edge = inner_edge(ENCL, 18).filter(ImageFilter.GaussianBlur(6)).point(lambda v: int(v * .20))
     field = ImageChops.add(field, edge, scale=1.0, offset=0)
     return _clip(field)
 
 
 def clearify_layers(layers, key: str):
-    """Turn shared glyph geometry into variable-density clear glass.
-
-    Geometry is unchanged. Only the per-pixel material mask and optical treatment differ.
-    """
+    """Turn shared glyph geometry into coherent variable-density clear glass."""
     result = []
-    for index, src in enumerate(layers):
+    field = _variable_surface_field(key)
+    reflection_field = _crescent(key, 61, 205).point(lambda v: int(v * .76))
+    glint_weight = _top_weight(.8)
+
+    for src in layers:
         item = dict(src)
         source_mask = item['mask']
         source_luma = luminance(item.get('fill', '#ffffff'))
-        field = _variable_surface_field(key, index + 17)
         material_mask = inter(source_mask, field)
 
         item['mask'] = material_mask
         item['material'] = 'glass'
-        item['fill'] = '#d3dbe6' if source_luma < 145 else '#eef3f8'
-        item['opacity'] = .36 if source_luma < 145 else .41
-        item['refraction'] = max(.125, min(.175, float(item.get('refraction', .06)) * 1.70))
+        item['fill'] = '#cbd5e2' if source_luma < 145 else '#eef4fa'
+        item['opacity'] = .34 if source_luma < 145 else .39
+        item['refraction'] = max(.130, min(.180, float(item.get('refraction', .06)) * 1.78))
         item['specular'] = 'outside'
-        item['shadow'] = .002
+        item['shadow'] = .0015
         item['blend'] = 'normal'
-        item['blur'] = min(.55, float(item.get('blur', 0)))
-        item['shadow_offset'] = .8
-        item['shadow_blur'] = 2.5
+        item['blur'] = min(.45, float(item.get('blur', 0)))
+        item['shadow_offset'] = .7
+        item['shadow_blur'] = 2.2
         result.append(item)
 
-        # Broad local reflection across only part of each foreground layer.
-        reflection = inter(source_mask, _crescent(key, index + 61, strength=195))
-        reflection = reflection.point(lambda v: int(v * .72))
+        # All layers of one icon share the same environmental reflection direction.
+        reflection = inter(source_mask, reflection_field)
         if reflection.getbbox():
             result.append(layer(
-                reflection, '#ffffff', .28, 0, 'off', 0,
+                reflection, '#ffffff', .34, 0, 'off', 0,
                 'ink', 'screen', (0, 0), 0, 0, 0,
             ))
 
-        # A very thin top-facing glint gives the crisp glass edge without a full outline.
-        glint = inter(top_facing_edge(source_mask, 2.4), _top_weight(.8)).point(lambda v: int(v * .58))
+        # Crisp top-facing glint, intentionally incomplete rather than an outline.
+        glint = inter(top_facing_edge(source_mask, 2.35), glint_weight).point(lambda v: int(v * .64))
         if glint.getbbox():
             result.append(layer(
-                glint, '#ffffff', .44, 0, 'off', 0,
+                glint, '#ffffff', .48, 0, 'off', 0,
                 'ink', 'screen', (0, 0), 0, 0, 0,
             ))
 
@@ -148,42 +150,39 @@ def clearify_layers(layers, key: str):
 
 
 def clear_background(key: str) -> Image.Image:
-    """A much clearer enclosure with non-uniform transparency and reflections."""
+    """Very clear enclosure with locally varying reflection and density."""
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
 
-    # 6–17% neutral body rather than the old uniform ~20% gray plate.
-    density = Image.new('L', (WORK, WORK), 16)
-    top = _top_weight(1.9).point(lambda v: int(v * .055))
+    # Roughly 5–14% neutral base: the wallpaper should dominate most of the plane.
+    density = Image.new('L', (WORK, WORK), 13)
+    top = _top_weight(1.9).point(lambda v: int(v * .045))
     density = ImageChops.add(density, top, scale=1.0, offset=0)
 
-    # Slightly denser glass near the enclosure edge.
-    edge = inner_edge(ENCL, 28).filter(ImageFilter.GaussianBlur(11)).point(lambda v: int(v * .12))
+    edge = inner_edge(ENCL, 28).filter(ImageFilter.GaussianBlur(10)).point(lambda v: int(v * .10))
     density = ImageChops.add(density, edge, scale=1.0, offset=0)
     density = _clip(density)
 
-    neutral = Image.new('RGBA', (WORK, WORK), (225, 232, 241, 0))
+    neutral = Image.new('RGBA', (WORK, WORK), (222, 230, 240, 0))
     neutral.putalpha(density)
     canvas.alpha_composite(neutral)
 
-    # Large environmental reflection. This is intentionally local, not a full-surface haze.
-    cres = _crescent(key, 1, strength=220).point(lambda v: int(v * .34))
+    # Strong local reflections create the glass reading; the rest remains clear.
+    cres = _crescent(key, 1, 225).point(lambda v: int(v * .43))
     white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     white.putalpha(cres)
     canvas.alpha_composite(white)
 
-    # Narrow secondary reflection/caustic.
-    streak = _streak(key, 3, strength=200).point(lambda v: int(v * .26))
-    cold = Image.new('RGBA', (WORK, WORK), (241, 248, 255, 0))
+    streak = _streak(key, 3, 210).point(lambda v: int(v * .32))
+    cold = Image.new('RGBA', (WORK, WORK), (240, 248, 255, 0))
     cold.putalpha(streak)
     canvas.alpha_composite(cold)
 
-    # Directional edge response, stronger at the top and only subtly dark at the bottom.
-    top_edge = inter(top_facing_edge(ENCL, 4.2), _top_weight(.72)).point(lambda v: int(v * .78))
+    top_edge = inter(top_facing_edge(ENCL, 4.1), _top_weight(.72)).point(lambda v: int(v * .88))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
 
-    low_edge = inter(bottom_facing_edge(ENCL, 2.0), _bottom_weight(1.15)).point(lambda v: int(v * .07))
+    low_edge = inter(bottom_facing_edge(ENCL, 2.0), _bottom_weight(1.15)).point(lambda v: int(v * .055))
     shade = Image.new('RGBA', (WORK, WORK), (55, 63, 76, 0))
     shade.putalpha(low_edge)
     canvas.alpha_composite(shade)
@@ -191,18 +190,16 @@ def clear_background(key: str) -> Image.Image:
 
 
 def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
-    """Final surface reflections while retaining the already-variable alpha channel."""
-    # Secondary broad lobe at a different phase. It should read as a reflection, not frost.
-    lobe = _crescent(key, 9, strength=170).point(lambda v: int(v * .18))
+    """Final reflection pass while preserving the locally varying alpha channel."""
+    lobe = _crescent(key, 9, 185).point(lambda v: int(v * .24))
     white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     white.putalpha(lobe)
     canvas.alpha_composite(white)
 
-    # Hairline exterior highlight only where the top-facing edge catches light.
-    hair = inter(outer_edge(ENCL, 1.35), _top_weight(.7)).point(lambda v: int(v * .30))
+    hair = inter(outer_edge(ENCL, 1.35), _top_weight(.7)).point(lambda v: int(v * .36))
     rim = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     rim.putalpha(hair)
     canvas.alpha_composite(rim)
 
-    # Do NOT replace alpha with ENCL. Preserve real local transparency.
+    # Never replace the alpha with an opaque rounded-square mask.
     canvas.putalpha(inter(canvas.getchannel('A'), ENCL))
