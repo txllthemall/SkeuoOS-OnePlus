@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from generate_liquid27 import (
@@ -8,16 +9,14 @@ from generate_liquid27 import (
 )
 from liquid27.catalog import ICON_SPECS
 from liquid27.clear_material import preview_refract_patch, clear_background, finish_clear_enclosure
-from liquid27.material import WORK
+from liquid27.glass_surface import enclosure_surface
+from liquid27.glass_optics import composite_container
 
 OUTDIR = ROOT / 'build/liquid27-v4/clear'
 
 
-def _rails(d, w, h, light=(240,238,240), dark=(38,37,43)):
-    d.arc((-320,-260,900,680),8,125,fill=light,width=6)
-    d.arc((-200,300,1320,1200),6,126,fill=light,width=5)
-    d.arc((250,790,1510,1820),194,316,fill=light,width=5)
-    d.line((0,int(h*.53),w,int(h*.43)),fill=dark,width=11)
+def _rails(d,w,h,light=(240,238,240),dark=(38,37,43)):
+    d.arc((-320,-260,900,680),8,125,fill=light,width=6); d.arc((-200,300,1320,1200),6,126,fill=light,width=5); d.arc((250,790,1510,1820),194,316,fill=light,width=5); d.line((0,int(h*.53),w,int(h*.43)),fill=dark,width=11)
 
 
 def _color_test_wallpaper(w=1080,h=1640):
@@ -43,13 +42,15 @@ def _single_wallpaper(kind,w=1080,h=1640):
 def _stress_wallpaper(w=1080,h=1640):
     wall=Image.new('RGB',(w,h),(126,126,126)); d=ImageDraw.Draw(wall)
     d.rectangle((0,0,w//2,h//2),fill=(18,18,20)); d.rectangle((w//2,0,w,h//2),fill=(240,240,240)); d.rectangle((0,h//2,w//2,h),fill=(82,82,86)); d.rectangle((w//2,h//2,w,h),fill=(168,168,172))
-    for x in range(22,w,54): d.line((x,0,x,h),fill=(245,245,245) if (x//54)%2==0 else (16,16,16),width=2)
-    for y in range(35,h,75): d.line((0,y,w,y),fill=(238,238,238) if (y//75)%2==0 else (25,25,25),width=2)
-    for x in range(-500,w+500,120): d.line((x,0,x+700,h),fill=(250,250,250) if (x//120)%2==0 else (12,12,12),width=3)
-    for yy in range(80,430,44):
-        for xx in range(650,1020,44):
-            if ((xx//44)+(yy//44))%2==0: d.rectangle((xx,yy,xx+21,yy+21),fill=(20,20,20))
-    d.arc((-320,190,1280,1120),4,174,fill=(255,255,255),width=7); d.arc((-180,610,1420,1540),186,352,fill=(12,12,12),width=7)
+    for x in range(22,w,42): d.line((x,0,x,h),fill=(245,245,245) if (x//42)%2==0 else (16,16,16),width=1 if (x//42)%3 else 3)
+    for y in range(35,h,65): d.line((0,y,w,y),fill=(238,238,238) if (y//65)%2==0 else (25,25,25),width=2)
+    for x in range(-600,w+600,105): d.line((x,0,x+760,h),fill=(250,250,250) if (x//105)%2==0 else (12,12,12),width=2)
+    for yy in range(80,430,36):
+        for xx in range(650,1020,36):
+            c=(18,18,18) if ((xx//36)+(yy//36))%2==0 else (238,238,238); d.rectangle((xx,yy,xx+18,yy+18),fill=c)
+    for yy in range(930,1280,45):
+        for xx in range(90,450,45): d.ellipse((xx,yy,xx+5,yy+5),fill=(250,250,250))
+    d.arc((-320,190,1280,1120),4,174,fill=(255,255,255),width=6); d.arc((-180,610,1420,1540),186,352,fill=(12,12,12),width=6)
     d.text((70,1450),'EDGE / MID / CENTER / GLYPH',fill=(250,250,250)); return wall
 
 
@@ -61,12 +62,15 @@ def _images():
     return out
 
 
-def _render_grid(wall,images,names,home=False):
+def _render_grid(wall,images,names,home=False,optical=True):
     d=ImageDraw.Draw(wall); font=ImageFont.truetype(FONT_REG,24 if home else 22); chosen=[n for n in names if n in images][:20]
     for i,name in enumerate(chosen):
         if home: x=92+(i%4)*245; y=270+(i//4)*245; size=122; ly=y+136
         else: x=72+(i%4)*250; y=90+(i//4)*270; size=126; ly=y+139
-        _paste_wallpaper_icon(wall,images,name,x,y,size,'clear'); label=name[6:].replace('_',' ')[:14]; box=d.textbbox((0,0),label,font=font); d.text((x+size/2-(box[2]-box[0])/2,ly),label,font=font,fill=(248,248,248))
+        if optical: _paste_wallpaper_icon(wall,images,name,x,y,size,'clear')
+        else:
+            ic=images[name].resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),ic)
+        label=name[6:].replace('_',' ')[:14]; box=d.textbbox((0,0),label,font=font); d.text((x+size/2-(box[2]-box[0])/2,ly),label,font=font,fill=(248,248,248))
     return wall
 
 
@@ -74,35 +78,58 @@ def _container_icon(name,size):
     c=clear_background(name); finish_clear_enclosure(c,name); return c.resize((size,size),Image.Resampling.LANCZOS)
 
 
-def _container_only_preview(images):
+def _container_only(optical=True):
     wall=_stress_wallpaper(); d=ImageDraw.Draw(wall); font=ImageFont.truetype(FONT_REG,22)
-    names=[n for n in GEOMETRY_FOCUS if n in images][:16]
-    for i,name in enumerate(names):
+    for i,name in enumerate(GEOMETRY_FOCUS[:16]):
         x=72+(i%4)*250; y=90+(i//4)*270; size=126
-        patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch), (x,y)); ic=_container_icon(name,size); wall.paste(ic,(x,y),ic)
+        if optical:
+            patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch),(x,y))
+        ic=_container_icon(name,size); wall.paste(ic,(x,y),ic)
         lab='container'; b=d.textbbox((0,0),lab,font=font); d.text((x+63-(b[2]-b[0])/2,y+139),lab,font=font,fill=(248,248,248))
     return wall
 
 
-def _glyph_only_preview(images):
-    # Uses the true glyph refraction but intentionally omits the static enclosure layer.
+def _glyph_only(images,optical=True):
     wall=_stress_wallpaper(); d=ImageDraw.Draw(wall); font=ImageFont.truetype(FONT_REG,22)
     names=['skeuo_github','skeuo_discord','skeuo_reddit','skeuo_google_drive','skeuo_revanced','skeuo_2gis','skeuo_gamehub','skeuo_telegram']
     for i,name in enumerate(names):
-        x=72+(i%4)*250; y=180+(i//4)*500; size=126
-        patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch,_foreground_mask(name)),(x,y))
-        # Composite the glyph-bearing icon but remove most enclosure alpha by using foreground mask.
-        ic=images[name].resize((size,size),Image.Resampling.LANCZOS); fm=_foreground_mask(name).resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),fm)
+        x=72+(i%4)*250; y=180+(i//4)*500; size=126; fm=_foreground_mask(name).resize((size,size),Image.Resampling.LANCZOS)
+        if optical:
+            patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch,_foreground_mask(name)),(x,y))
+        ic=images[name].resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),fm)
         lab=name[6:].replace('_',' '); b=d.textbbox((0,0),lab,font=font); d.text((x+63-(b[2]-b[0])/2,y+139),lab,font=font,fill=(248,248,248))
     return wall
 
 
 def _material_ab(images):
     base=_stress_wallpaper(1080,1120); left=base.copy(); right=base.copy(); names=['skeuo_github','skeuo_discord','skeuo_revanced','skeuo_2gis','skeuo_gamehub','skeuo_telegram','skeuo_reddit','skeuo_google_drive']
-    # A: static alpha compositing only. B: current coherent live-background optics.
     for i,name in enumerate(names):
         x=70+(i%4)*250; y=120+(i//4)*420; size=126; ic=images[name].resize((size,size),Image.Resampling.LANCZOS); left.paste(ic,(x,y),ic); _paste_wallpaper_icon(right,images,name,x,y,size,'clear')
-    out=Image.new('RGB',(2160,1120)); out.paste(left,(0,0)); out.paste(right,(1080,0)); d=ImageDraw.Draw(out); f=ImageFont.truetype(FONT_REG,34); d.text((40,35),'A  static compositing',font=f,fill=(255,255,255)); d.text((1120,35),'B  coherent Liquid Glass optics',font=f,fill=(255,255,255)); return out
+    out=Image.new('RGB',(2160,1120)); out.paste(left,(0,0)); out.paste(right,(1080,0)); d=ImageDraw.Draw(out); f=ImageFont.truetype(FONT_REG,30); d.text((38,35),'STATIC ANDROID RGBA',font=f,fill=(255,255,255)); d.text((1118,35),'FULL OPTICAL SIMULATION',font=f,fill=(255,255,255)); return out
+
+
+def _android_reality(images): return _material_ab(images)
+
+
+def _android_static(images,kind): return _render_grid(_single_wallpaper(kind),images,GEOMETRY_FOCUS,optical=False)
+
+
+def _launcher_scale(images):
+    wall=_neutral_test_wallpaper(1080,900); d=ImageDraw.Draw(wall); f=ImageFont.truetype(FONT_REG,24); names=['skeuo_github','skeuo_discord','skeuo_2gis','skeuo_revanced']; sizes=[48,64,72,96,128]
+    for row,name in enumerate(names):
+        y=90+row*190
+        for col,size in enumerate(sizes):
+            x=70+col*195; ic=images[name].resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),ic); d.text((x,y+size+10),f'{size}px',font=f,fill=(245,245,245))
+    return wall
+
+
+def _debug_surface(kind,size=768):
+    s=enclosure_surface(size)
+    if kind=='normals':
+        rgb=np.stack(((s['nx']*.5+.5)*255,(s['ny']*.5+.5)*255,s['nz']*255),axis=-1); rgb*=s['inside'][...,None]; return Image.fromarray(np.clip(rgb,0,255).astype(np.uint8),'RGB')
+    if kind=='fresnel':
+        v=np.clip(s['fresnel']*2.4+s['fmid']*.30,0,1); return Image.fromarray(np.repeat((v*255).astype(np.uint8)[...,None],3,axis=2),'RGB')
+    dummy=Image.new('RGB',(size,size),(128,128,128)); _,dx,dy,_=composite_container(dummy); mag=np.sqrt(dx*dx+dy*dy); m=np.percentile(mag[s['inside']>0],99.5); nx=np.clip(dx/max(m,1e-6),-.5,.5)+.5; ny=np.clip(dy/max(m,1e-6),-.5,.5)+.5; b=np.clip(mag/max(m,1e-6),0,1); rgb=np.stack((nx,ny,b),axis=-1)*255; rgb*=s['inside'][...,None]; return Image.fromarray(np.clip(rgb,0,255).astype(np.uint8),'RGB')
 
 
 def main():
@@ -110,8 +137,14 @@ def main():
     _render_grid(_color_test_wallpaper(),images,focus).save(OUTDIR/'preview_color_wallpaper.png'); _render_grid(_color_test_wallpaper(1080,1920),images,HOME_SHOW,True).save(OUTDIR/'preview_home_color.png'); _render_grid(_neutral_test_wallpaper(),images,focus).save(OUTDIR/'preview_neutral_wallpaper.png')
     for kind in ('warm','blue','dark','bright','red','cyan'): _render_grid(_single_wallpaper(kind),images,focus).save(OUTDIR/f'preview_{kind}_wallpaper.png')
     _render_grid(_stress_wallpaper(),images,diag).save(OUTDIR/'preview_refraction_stress.png'); _render_grid(_stress_wallpaper(),images,focus).save(OUTDIR/'preview_highcontrast_wallpaper.png')
-    _container_only_preview(images).save(OUTDIR/'preview_container_only.png'); _glyph_only_preview(images).save(OUTDIR/'preview_glyph_glass_only.png'); _material_ab(images).save(OUTDIR/'preview_material_ab.png')
-    print('Generated expanded Clear optical/material diagnostics.')
+    _container_only(True).save(OUTDIR/'preview_container_only.png'); _glyph_only(images,True).save(OUTDIR/'preview_glyph_glass_only.png'); _material_ab(images).save(OUTDIR/'preview_material_ab.png')
+    _android_reality(images).save(OUTDIR/'preview_android_reality_check.png'); _container_only(False).save(OUTDIR/'preview_android_container_only.png'); _glyph_only(images,False).save(OUTDIR/'preview_android_glyph_only.png'); _launcher_scale(images).save(OUTDIR/'preview_android_launcher_scale.png')
+    for kind in ('warm','blue','dark','bright'): _android_static(images,kind).save(OUTDIR/f'preview_android_static_{kind}.png')
+    _render_grid(_stress_wallpaper(),images,focus,optical=False).save(OUTDIR/'preview_android_static_highcontrast.png')
+    # Android A/B currently compares launcher-real static material against full optics side by side; this deliberately exposes the production gap rather than hiding it.
+    _android_reality(images).save(OUTDIR/'preview_android_material_ab.png')
+    _debug_surface('normals').save(OUTDIR/'preview_surface_normals.png'); _debug_surface('flow').save(OUTDIR/'preview_optical_flow.png'); _debug_surface('fresnel').save(OUTDIR/'preview_fresnel_field.png')
+    print('Generated full optical + static Android Liquid Glass diagnostics.')
 
 
 if __name__=='__main__': main()
