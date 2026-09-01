@@ -1,0 +1,26 @@
+name: Clear v4.1 Preview
+
+on:
+  push:
+    branches: [ v4.1-clear-glass ]
+    paths:
+      - 'tools/liquid27/clear_material.py'
+      - 'tools/generate_liquid27_v41.py'
+      - 'tools/preview_clear_v41.py'
+      - '.github/workflows/clear-preview.yml'
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install icon tooling
+        run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
+      - name: Render 20-icon Clear reference preview
+        run: python3 tools/preview_clear_v41.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SkeuoOS-Clear-v4.1-quick-preview
+          path: build/clear-v41-quick/*.png
+          if-no-files-found: error
