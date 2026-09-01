@@ -2,9 +2,8 @@ from __future__ import annotations
 
 """Single production geometry registry.
 
-All release rendering resolves a catalog kind through this module exactly once.
-The older glyph modules are treated as vector libraries only; there is no
-fallback chain and no import-order-dependent override.
+Every catalog kind has exactly one production owner. Historical modules below
+are vector libraries, never a fallback chain and never import-order overrides.
 """
 
 from .catalog import ICON_SPECS
@@ -15,6 +14,7 @@ from .glyphs_vector_tuned import glyph_vector_tuned, TUNED_KINDS
 from .glyphs_vector_home import (
     glyph_vector_home,
     HOME_VECTOR_KINDS,
+    GMAIL_D,
     SOUNDCLOUD_D,
     CLOUD_D,
     SUN_D,
@@ -27,27 +27,30 @@ from .glyphs_brand_curated import (
     GOOGLE_PLAY_BOTTOM_D,
     GOOGLE_PLAY_TIP_D,
 )
-from .glyphs_vector_complete import glyph_vector_complete, COMPLETE_VECTOR_KINDS
+from .glyphs_vector_complete import (
+    glyph_vector_complete,
+    COMPLETE_VECTOR_KINDS,
+    AMAZON_D,
+    PAYPAL_D,
+    STRAVA_D,
+)
+from .brand_assets import KASPI_MARK
 
 
 def _glass(mask, fill='#fff', opacity=.88, refraction=.088, specular='outside', shadow=.010):
     return layer(mask, fill, opacity, refraction, specular, shadow, 'glass', 'normal', (0, -2), 0, 1.2, 3.0)
 
 
-# These are the only production overrides. They exist because launcher-scale QA
-# demonstrated a concrete geometry/optical problem in the library definition.
+# Only concrete launcher-scale fixes live here. They preserve source geometry
+# that already passed visual review and correct the known outliers.
 OVERRIDE_KINDS = {
     'gamehub', 'playstore', 'weather', 'revanced', 'soundcloud', 'drive', 'appstore',
+    'gmail', 'kaspi', 'amazon', 'paypal', 'strava',
 }
 
 
 def _gamehub():
-    """GameSir/GameHub app-scale mark from the current official icon.
-
-    The mark is two FILLED angular bracket surfaces plus a plus and two circular
-    controls. There are deliberately no nested rails, outlines or stroked
-    wireframe shells.
-    """
+    """Filled GameSir/GameHub controller mark; never a nested wireframe."""
     left = svg_mask('''
       <path d="M278 234 H366 L158 512 L226 654 H642 L594 726 H188 L88 512 Z" fill="#fff"/>
     ''')
@@ -69,8 +72,6 @@ def _gamehub():
 
 
 def _playstore():
-    # Google Play is intrinsically left-heavy. Shift the source-vector fit to
-    # the right before Cairo rasterisation, preserving the four material faces.
     target = (246, 226, 894, 798)
     return [
         _glass(path_mask(GOOGLE_PLAY_LEFT_D, viewbox=(0, 0, 24, 24), target=target), '#34a853', .90, .082),
@@ -80,9 +81,38 @@ def _playstore():
     ]
 
 
+def _gmail():
+    # Preserve the reviewed full M-envelope silhouette and launcher-scale mass.
+    mask = path_mask(GMAIL_D, viewbox=(0, 0, 24, 24), target=(154, 218, 870, 806), fill_rule='evenodd')
+    return [_glass(mask, '#ea4335', .92, .092, 'inside', .004)]
+
+
+def _kaspi():
+    # Verified Kaspi emblem that produced the accepted preview, not the old
+    # invented person/card semantic substitute.
+    mask = svg_mask(KASPI_MARK, viewbox=(0, 0, 192, 192), target=(210, 192, 814, 824))
+    return [_glass(mask, '#ffffff', .91, .090, 'inside', .006)]
+
+
+def _amazon():
+    # Full a + smile/arrow mark: readable at launcher scale, unlike smile-only.
+    mask = path_mask(AMAZON_D, viewbox=(0, 0, 448, 512), target=(172, 132, 852, 884), fill_rule='evenodd')
+    return [_glass(mask, '#17191c', .92, .086, 'inside', .004)]
+
+
+def _paypal():
+    # Preserve the reviewed reduced visual mass.
+    mask = path_mask(PAYPAL_D, viewbox=(0, 0, 384, 512), target=(286, 190, 738, 826), fill_rule='evenodd')
+    return [_glass(mask, '#ffffff', .90, .086, 'inside', .004)]
+
+
+def _strava():
+    # Preserve the reviewed larger launcher-scale chevrons.
+    mask = path_mask(STRAVA_D, viewbox=(0, 0, 384, 512), target=(226, 126, 798, 886), fill_rule='evenodd')
+    return [_glass(mask, '#ffffff', .90, .088, 'inside', .004)]
+
+
 def _weather():
-    # The previous composition was bottom-heavy. Move both semantic layers up
-    # at vector-fit time without changing their silhouette.
     sun = path_mask(SUN_D, viewbox=(0, 0, 16, 16), target=(410, 82, 850, 522))
     cloud = path_mask(CLOUD_D, viewbox=(0, 0, 16, 16), target=(190, 205, 850, 730))
     return [
@@ -92,7 +122,6 @@ def _weather():
 
 
 def _revanced():
-    # Preserve the ReVanced play/rail semantics, but correct the left-heavy mass.
     mark = svg_mask('''
       <g transform="translate(54 0)">
         <path d="M382 300 L746 512 L382 724 Z" fill="#fff"/>
@@ -104,14 +133,11 @@ def _revanced():
 
 
 def _soundcloud():
-    # Launcher coverage was 5.1%; enlarge the genuine SoundCloud path instead
-    # of thickening individual bars or inventing a replacement glyph.
     mark = path_mask(SOUNDCLOUD_D, viewbox=(0, 0, 24, 24), target=(115, 242, 909, 782))
     return [_glass(mark, '#fff', .86, .092, 'outside', .014)]
 
 
 def _drive():
-    # Same three Google Drive faces, shifted slightly upward for optical mass.
     green = svg_mask('<path d="M410 216 H560 L806 642 H656 Z" fill="#fff"/>')
     yellow = svg_mask('<path d="M410 216 L164 642 L240 774 L486 348 Z" fill="#fff"/>')
     blue = svg_mask('<path d="M240 774 L164 642 H656 L806 642 L730 774 Z" fill="#fff"/>')
@@ -123,7 +149,6 @@ def _drive():
 
 
 def _appstore():
-    # Keep the familiar construction but increase launcher-scale visual mass.
     a1 = stroked_path_mask('M330 734 L503 402', width=74)
     a2 = stroked_path_mask('M521 402 L694 734', width=74)
     cross = stroked_path_mask('M370 646 L660 646', width=70)
@@ -137,6 +162,11 @@ def _appstore():
 OVERRIDES = {
     'gamehub': _gamehub,
     'playstore': _playstore,
+    'gmail': _gmail,
+    'kaspi': _kaspi,
+    'amazon': _amazon,
+    'paypal': _paypal,
+    'strava': _strava,
     'weather': _weather,
     'revanced': _revanced,
     'soundcloud': _soundcloud,
@@ -144,8 +174,6 @@ OVERRIDES = {
     'appstore': _appstore,
 }
 
-# Derive mutually-exclusive production ownership. Raw library sets are allowed
-# to overlap historically; production ownership is not.
 OWN_OVERRIDE = set(OVERRIDE_KINDS)
 OWN_TUNED = set(TUNED_KINDS) - OWN_OVERRIDE
 OWN_CURATED = set(BRAND_CURATED_KINDS) - OWN_OVERRIDE - OWN_TUNED
