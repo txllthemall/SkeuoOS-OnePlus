@@ -6,10 +6,11 @@ import sys
 
 import numpy as np
 
+from liquid27.geometry import PRODUCTION_KINDS, duplicate_production_kinds, geometry_owner
+from liquid27.catalog import ICON_SPECS
+
 ROOT = Path(__file__).resolve().parents[1]
 
-# Visual-review gate: these marks were explicitly called out as broken or too
-# weak/heavy. SVG provenance alone is not sufficient for them to pass.
 STRICT_GEOMETRY = {
     'skeuo_gamehub', 'skeuo_github', 'skeuo_playstore', 'skeuo_kaspi',
     'skeuo_pinterest', 'skeuo_telegram', 'skeuo_gmail', 'skeuo_discord',
@@ -26,10 +27,10 @@ def mapping_checks(errors):
     assets_path = ROOT / 'app/src/main/assets/appfilter.xml'
     appfilter = res_path.read_text(encoding='utf-8')
 
-    if assets_path.exists():
-        assets = assets_path.read_text(encoding='utf-8')
-        if appfilter != assets:
-            errors.append('res/xml/appfilter.xml and assets/appfilter.xml are desynchronized')
+    if not assets_path.exists():
+        errors.append('Missing generated assets/appfilter.xml')
+    elif appfilter != assets_path.read_text(encoding='utf-8'):
+        errors.append('res/xml/appfilter.xml and assets/appfilter.xml are desynchronized')
 
     required = {
         'com.android.vending/com.google.android.finsky.activities.MainActivity': 'skeuo_playstore',
@@ -54,9 +55,26 @@ def mapping_checks(errors):
             errors.append(f'Forbidden cross-brand alias remains: {component_or_package} -> {drawable}')
 
 
+def registry_checks(errors):
+    duplicates = duplicate_production_kinds()
+    if duplicates:
+        errors.append(f'duplicate production geometry definitions: {sorted(duplicates)}')
+    catalog_kinds = {kind for _, kind, _ in ICON_SPECS.values()}
+    if PRODUCTION_KINDS != catalog_kinds:
+        errors.append(
+            f'production registry mismatch: missing={sorted(catalog_kinds-PRODUCTION_KINDS)}, '
+            f'extra={sorted(PRODUCTION_KINDS-catalog_kinds)}'
+        )
+    for kind in catalog_kinds:
+        try:
+            geometry_owner(kind)
+        except Exception as exc:
+            errors.append(f'{kind}: no unique production geometry owner ({exc})')
+
+
 def _reflection_iou(a, b):
-    aa = np.asarray(a.resize((96, 96)), dtype=np.uint8) > 12
-    bb = np.asarray(b.resize((96, 96)), dtype=np.uint8) > 12
+    aa = np.asarray(a.resize((96, 96)), dtype=np.uint8) > 8
+    bb = np.asarray(b.resize((96, 96)), dtype=np.uint8) > 8
     union = np.logical_or(aa, bb).sum()
     if union == 0:
         return 0.0
@@ -66,16 +84,16 @@ def _reflection_iou(a, b):
 def reflection_checks(rows, errors, warnings):
     from liquid27.clear_material import clear_reflection_mask
 
-    reflected = [r for r in rows if r['clear_reflection_coverage_pct'] > 0.005]
+    reflected = [r for r in rows if r['clear_reflection_coverage_pct'] > 0.002]
     zero_count = len(rows) - len(reflected)
-    if zero_count < int(len(rows) * .45):
+    if zero_count < int(len(rows) * .60):
         errors.append(f'Environmental reflection is too ubiquitous: only {zero_count}/{len(rows)} icons have none')
 
     for r in rows:
         cov = r['clear_reflection_coverage_pct']
-        if cov > 2.5:
+        if cov > .80:
             errors.append(f"{r['icon']}: environmental reflection coverage {cov:.3f}% is too large")
-        elif cov > 1.6:
+        elif cov > .45:
             warnings.append(f"{r['icon']}: environmental reflection coverage {cov:.3f}% is high")
 
     masks = [(r['icon'], clear_reflection_mask(r['icon'])) for r in reflected]
@@ -87,26 +105,46 @@ def reflection_checks(rows, errors, warnings):
             similarities.append(score)
             if score > worst[0]:
                 worst = (score, masks[i][0], masks[j][0])
-
     if similarities:
         median_similarity = statistics.median(similarities)
         highly_similar = sum(1 for x in similarities if x >= .88)
-        if median_similarity > .72 or highly_similar > max(2, len(masks) // 4):
+        if median_similarity > .65 or highly_similar > max(2, len(masks) // 5):
             errors.append(
-                'procedural reflection repetition: '
+                'PROCEDURAL REFLECTION REPETITION: '
                 f'median IoU={median_similarity:.3f}, high-similarity pairs={highly_similar}, '
                 f'worst={worst[0]:.3f} ({worst[1]}, {worst[2]})'
             )
+
+
+def material_checks(rows, errors, warnings):
+    centres = [r.get('enclosure_center_density', 0.0) for r in rows]
+    edges = [r.get('enclosure_edge_density', 0.0) for r in rows]
+    specs = [r.get('specular_coverage_pct', 0.0) for r in rows]
+    disp_mean = [r.get('refraction_displacement_mean', 0.0) for r in rows]
+    disp_max = [r.get('refraction_displacement_max', 0.0) for r in rows]
+
+    c = statistics.mean(centres)
+    e = statistics.mean(edges)
+    if e <= c * 1.20:
+        errors.append(f'Clear optical thickness is too uniform: center={c:.2f}, edge={e:.2f}')
+    if c > 18:
+        errors.append(f'Clear enclosure centre is too dense/grey: {c:.2f}')
+    if statistics.mean(specs) > 2.0:
+        errors.append(f'Clear specular coverage too broad: {statistics.mean(specs):.3f}%')
+    if statistics.mean(disp_mean) < .15:
+        errors.append('Preview refraction displacement is effectively absent')
+    if max(disp_max) > 8.0:
+        errors.append(f'Preview refraction is too strong: max displacement {max(disp_max):.2f}px')
 
 
 def check_variant(variant):
     base = ROOT / f'build/liquid27-v4/{variant}'
     report = base / 'qa.json'
     if not report.exists():
-        raise SystemExit(f'Missing {variant} QA report; run the release generator first')
+        raise SystemExit(f'Missing {variant} QA report; run the production generator first')
     rows = json.loads(report.read_text(encoding='utf-8'))
-    if len(rows) < 30:
-        raise SystemExit(f'{variant}: only {len(rows)} QA rows; expected complete icon pack')
+    if len(rows) != len(ICON_SPECS):
+        raise SystemExit(f'{variant}: {len(rows)} QA rows; expected {len(ICON_SPECS)}')
 
     coverage = [r['coverage_pct'] for r in rows]
     contrast = [r['contrast_estimate'] for r in rows]
@@ -115,6 +153,8 @@ def check_variant(variant):
     errors = []
     warnings = []
     by_name = {r['icon']: r for r in rows}
+
+    registry_checks(errors)
 
     for r in rows:
         bbox_x = r['center_offset_x']
@@ -139,10 +179,10 @@ def check_variant(variant):
             warnings.append(f"{r['icon']}: foreground coverage {c}% vs median {median}%")
         if k < 0.10:
             warnings.append(f"{r['icon']}: low contrast estimate {k}")
-        if r.get('legacy') or r.get('renderer') != 'cairosvg-2048':
-            errors.append(f"{r['icon']}: legacy/non-vector geometry is forbidden")
-        if not r.get('geometry_source'):
-            errors.append(f"{r['icon']}: missing geometry provenance")
+        if r.get('legacy') or r.get('raster_fallback') or r.get('renderer') != 'cairosvg-2048':
+            errors.append(f"{r['icon']}: legacy/raster fallback geometry is forbidden")
+        if not r.get('geometry_source') or not r.get('geometry_owner'):
+            errors.append(f"{r['icon']}: missing geometry provenance/owner")
         if int(r.get('layer_count', 0)) <= 0:
             errors.append(f"{r['icon']}: empty geometry layer stack")
 
@@ -162,15 +202,16 @@ def check_variant(variant):
 
     mean_alpha = statistics.mean(alphas)
     if variant == 'clear':
-        if mean_alpha >= 130:
+        if mean_alpha >= 120:
             errors.append(f'Clear pack is too opaque: mean alpha {mean_alpha:.1f}')
-        if mean_alpha <= 16:
+        if mean_alpha <= 14:
             errors.append(f'Clear pack is too faint: mean alpha {mean_alpha:.1f}')
         reflection_checks(rows, errors, warnings)
+        material_checks(rows, errors, warnings)
     elif mean_alpha <= 145:
         warnings.append(f'Color pack unexpectedly transparent: mean alpha {mean_alpha:.1f}')
 
-    svg_count = sum(1 for r in rows if not r.get('legacy'))
+    svg_count = sum(1 for r in rows if not r.get('legacy') and not r.get('raster_fallback'))
     if svg_count != len(rows):
         errors.append(f'Vector coverage incomplete: {svg_count}/{len(rows)}; release requires 100% SVG2048')
 
@@ -182,17 +223,15 @@ def check_variant(variant):
     mail = by_name.get('skeuo_mail')
     if not gmail or gmail.get('kind') != 'gmail':
         errors.append('Gmail is not mapped to dedicated gmail geometry')
-    if gmail and mail:
-        if gmail.get('foreground_bbox') == mail.get('foreground_bbox') and abs(gmail['coverage_pct'] - mail['coverage_pct']) < .05:
-            errors.append('Gmail geometry appears identical to generic Mail')
+    if gmail and mail and gmail.get('foreground_bbox') == mail.get('foreground_bbox') and abs(gmail['coverage_pct'] - mail['coverage_pct']) < .05:
+        errors.append('Gmail geometry appears identical to generic Mail')
 
     play = by_name.get('skeuo_playstore')
     appstore = by_name.get('skeuo_appstore')
     if not play or play.get('kind') != 'playstore':
         errors.append('Google Play is not mapped to dedicated playstore geometry')
-    if play and appstore:
-        if play.get('foreground_bbox') == appstore.get('foreground_bbox') and abs(play['coverage_pct'] - appstore['coverage_pct']) < .05:
-            errors.append('Google Play geometry appears identical to App Store')
+    if play and appstore and play.get('foreground_bbox') == appstore.get('foreground_bbox') and abs(play['coverage_pct'] - appstore['coverage_pct']) < .05:
+        errors.append('Google Play geometry appears identical to App Store')
 
     mapping_checks(errors)
 
