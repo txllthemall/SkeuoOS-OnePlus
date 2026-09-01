@@ -8,17 +8,32 @@ android {
         applicationId 'io.github.txllthemall.skeuoos'
         minSdk 26
         targetSdk 36
-        versionCode 3
-        versionName '3.0.0'
+        versionCode 4
+        versionName '4.0.0'
     }
+
+    flavorDimensions += 'appearance'
+    productFlavors {
+        color {
+            dimension 'appearance'
+            // Keep the original package id so the color build upgrades the existing pack.
+        }
+        clear {
+            dimension 'appearance'
+            // Separate package id so Color and Clear can be installed side by side.
+            applicationIdSuffix '.clear'
+            versionNameSuffix '-clear'
+        }
+    }
+
     buildTypes {
         release { minifyEnabled false }
     }
 }
 
-// v3 artwork is generated locally from original vector-like geometry and
-// Liquid Glass material simulation. No upstream Apple icon files are bundled.
+// Both variants are generated from one vector/material codebase.  The Color flavor
+// keeps brand color while Clear bakes a low-chroma, partially transparent glass preset.
 tasks.register('generateLiquid27Icons', Exec) {
     workingDir rootProject.projectDir
-    commandLine 'python3', 'tools/generate_liquid27.py'
+    commandLine 'python3', 'tools/generate_liquid27.py', '--variant', 'all'
 }

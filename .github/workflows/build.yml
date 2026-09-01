@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, v4-liquid27 ]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -22,18 +22,31 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Install icon tooling
-        run: python3 -m pip install --disable-pip-version-check Pillow==11.3.0
-      - name: Generate Liquid27 icons
-        run: python3 tools/generate_liquid27.py
-      - name: Verify pack
+        run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
+      - name: Generate Color and Clear Liquid27 resources
+        run: python3 tools/generate_liquid27.py --variant all
+      - name: Liquid27 visual QA
+        run: python3 tools/qa_liquid27.py --variant all
+      - name: Verify both packs
         run: python3 tools/check_pack.py
-      - name: Build APK
-        run: gradle --no-daemon :app:assembleDebug
-      - name: Upload APK and preview
+      - name: Build both APKs
+        run: gradle --no-daemon :app:assembleColorDebug :app:assembleClearDebug
+      - name: Upload APKs and previews
         uses: actions/upload-artifact@v4
         with:
-          name: SkeuoOS-OnePlus-v3.0.0
+          name: SkeuoOS-Liquid27-v4.0.0-dual
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            build/liquid27-preview.png
+            app/build/outputs/apk/color/debug/app-color-debug.apk
+            app/build/outputs/apk/clear/debug/app-clear-debug.apk
+            build/liquid27-v4/color/preview_vector_reference.png
+            build/liquid27-v4/color/preview_full.png
+            build/liquid27-v4/color/preview_home.png
+            build/liquid27-v4/color/preview_wallpaper.png
+            build/liquid27-v4/color/qa.tsv
+            build/liquid27-v4/clear/preview_vector_reference.png
+            build/liquid27-v4/clear/preview_full.png
+            build/liquid27-v4/clear/preview_home.png
+            build/liquid27-v4/clear/preview_wallpaper.png
+            build/liquid27-v4/clear/qa.tsv
+            DESIGN_NOTES.md
           if-no-files-found: error
