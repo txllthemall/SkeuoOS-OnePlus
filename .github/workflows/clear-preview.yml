@@ -27,7 +27,7 @@ jobs:
         run: |
           python3 tools/generate_liquid27.py --variant clear --quick
           cp build/liquid27-v4/clear/preview_clear_light.png build/liquid27-v4/clear/preview_clear_flat.png
-      - name: Render Clear color-response validation set
+      - name: Render Clear optical validation set
         run: python3 tools/generate_clear_validation_previews.py
       - name: Check Clear neutral color bias
         run: python3 tools/qa_clear_neutral.py
@@ -50,5 +50,8 @@ jobs:
             build/liquid27-v4/clear/preview_cyan_wallpaper.png
             build/liquid27-v4/clear/preview_highcontrast_wallpaper.png
             build/liquid27-v4/clear/preview_refraction_stress.png
+            build/liquid27-v4/clear/preview_container_only.png
+            build/liquid27-v4/clear/preview_glyph_glass_only.png
+            build/liquid27-v4/clear/preview_material_ab.png
             build/liquid27-v4/clear/qa.tsv
           if-no-files-found: error
