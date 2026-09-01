@@ -1,6 +1,6 @@
 # SkeuoOS Liquid27 v4 — design notes
 
-This version is a clean-room, static Android interpretation of Apple's current iOS 27 app-icon material system. It does **not** bundle or extract Apple app-icon artwork, and it does not reuse the v2 iOS 6 archive.
+This version is a static Android interpretation of Apple's current iOS 27 app-icon material system. It does **not** bundle or extract Apple app-icon artwork, and it does not reuse the v2 iOS 6 archive.
 
 ## Official sources used as source of truth
 
@@ -20,19 +20,44 @@ Reviewed on 2026-08-31:
 1. **Layer-first construction.** A background plus one or more meaningful foreground layers is the primary model. Layers are ordered back-to-front; material properties belong to layers/groups rather than being painted onto a flattened bitmap.
 2. **Simple, bold, overlapping shapes.** Launcher-scale readability is a first-class target. Excessive complexity is avoided because overlap/refraction becomes noisy at small sizes.
 3. **No decorative outer shell.** Apple applies the enclosure and platform crop. Android needs a flattened crop, but v4 does not add a metallic ring, bevel, pseudo-chrome shell, or large common drop shadow.
-4. **Sharper iOS 27 material.** Apple's 2026 Icon Composer guidance describes a new sharper rendering, crisp specular highlights and a vertical light angle from above. The WWDC26 group lab also recommends reviewing/reducing translucency for legibility when bringing iOS 26 icons forward.
+4. **Sharper iOS 27 material.** Apple's 2026 Icon Composer guidance describes a sharper rendering, crisp specular highlights and a vertical light angle from above. The WWDC26 group lab also recommends reviewing/reducing translucency for legibility when bringing iOS 26 icons forward.
 5. **Directional specular.** The renderer supports `automatic`, `inside`, `outside`, and `off`. Highlights are generated from directional mask edges, not a uniform white outline.
 6. **Real under-layer sampling.** Static refraction samples pixels already composited beneath a layer. A stronger edge band creates lens-like bending near material boundaries. This is not a generic white overlay or blur.
 7. **Restrained translucency.** The material tint remains saturated while enough of the actual lower layer is transmitted for the glass to read as material instead of a pastel sticker.
 8. **Restrained shadows.** Shadows only separate z-layers. There is no floating-button shadow treatment on the enclosure.
 9. **Optical consistency.** QA measures foreground bounds, occupied area, center offset, luminance and contrast and produces full, neutral, wallpaper and OnePlus-scale previews.
-10. **Vector-like source geometry.** V4 geometry is built from masks, curves, paths and primitives on Apple's documented 1024×1024 icon canvas, then baked to 512×512 with Lanczos. No old raster glyph is scaled up.
+10. **Continuous vector source geometry.** The reference glyph set is authored as SVG paths/primitives. Cairo rasterizes those paths at 2048 px, then the mask is downsampled into the material renderer and finally baked to 512×512 with Lanczos. No reference glyph is created by rotating a bitmap mask, joining Pillow polygons, or sampling a Bézier into a thick polyline.
 
-## Curated v4 geometry
+## SVG2048 reference geometry
 
-The most visible icons use a new `glyphs_v4.py` layer set rather than the v3 glyph shortcuts. Current curated set includes Phone, Messages, Camera, Photos, Settings, Mail, Gmail, Maps, Clock, Weather, Notes, Calendar, App Store, Calculator, Recorder, Telegram, Discord, YouTube, ReVanced, Chrome, Spotify, Instagram, SoundCloud, Kaspi, 2GIS, ChatGPT, GameHub and Play Store. Existing Android component mappings are retained; less-common icons can still use the semantic fallback geometry while the curated set expands.
+The geometry gate currently covers 12 reference icons:
 
-## v3 failures explicitly removed
+- Phone
+- Messages
+- Camera
+- Photos
+- Settings
+- Mail
+- Telegram
+- Discord
+- YouTube
+- Spotify
+- Instagram
+- ChatGPT
+
+`tools/liquid27/vector.py` is the vector rasterization boundary and `tools/liquid27/glyphs_vector.py` contains the reference geometry. `tools/generate_liquid27.py` always prefers this path for the reference set. `tools/qa_liquid27.py` fails CI if fewer than 12 generated icons report the `svg2048` geometry engine.
+
+The remaining catalog is still transitional and may use the older v4 semantic geometry until it is migrated. It is intentionally not described as finished.
+
+## Geometry-source licensing
+
+No Apple icon artwork is shipped.
+
+For a small number of generic/system semantic silhouettes, the vector base comes from **Bootstrap Icons**, MIT licensed. For selected brand silhouettes, geometry is derived from **SuperTinyIcons**, MIT licensed, and **Simple Icons**, CC0. Their trademark policies still apply to the respective brands. Material, layout, refraction, color treatment and Android packaging are SkeuoOS work.
+
+These sources are used specifically to avoid the previous failure mode where recognisable shapes were approximated with hand-entered rectangles, triangles and sampled bitmap curves.
+
+## v3 / early-v4 failures explicitly removed from the reference set
 
 - shared metallic frame / bevel
 - pseudo-skeuomorphic button shell
@@ -40,7 +65,9 @@ The most visible icons use a new `glyphs_v4.py` layer set rather than the v3 gly
 - universal vertical gradient used as fake depth
 - white-overlay “glass”
 - tiny glyphs floating inside oversized containers
-- letters used as a shortcut for core brands where a semantic mark can be constructed
+- low-point-count polygon approximations of recognisable brand marks
+- bitmap rotation of already-rasterized masks
+- sampled Bézier-as-thick-line handset geometry
 - zagnut / iOS 6 fallback artwork and importer
 
 ## Static Android approximations
@@ -59,7 +86,8 @@ Apple's native renderer is dynamic. A PNG icon pack cannot reproduce all of it.
 - vertical-light directional specular response
 - restrained per-layer shadow
 - normal, screen, multiply and additive-style blend paths where useful
-- high-resolution render followed by Lanczos 512×512 output
+- SVG reference masks rasterized at 2048 px
+- Lanczos 512×512 output
 - launcher-safe alpha enclosure and safe-area-oriented artwork
 
 ### Not possible in a static OxygenOS PNG
@@ -79,8 +107,9 @@ V4 therefore targets **Default appearance at Home Screen size** and bakes a cons
 
 Preview contexts:
 
-1. full contact sheet
-2. light neutral
-3. dark neutral
-4. color-rich wallpaper field
-5. OnePlus/Home-Screen-scale layout
+1. `preview_vector_reference.png` — the 12 SVG2048 geometry references
+2. full contact sheet
+3. light neutral
+4. dark neutral
+5. color-rich wallpaper field
+6. OnePlus/Home-Screen-scale layout
