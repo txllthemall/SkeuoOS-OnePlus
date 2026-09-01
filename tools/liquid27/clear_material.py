@@ -52,11 +52,11 @@ def _horizontal_weight(left: bool) -> Image.Image:
 
 
 def reflection_style(key: str) -> int:
-    """0 none (~70%), 1 subtle edge catch (~20%), 2 rare stronger catch (~10%)."""
+    """0 none (~50%), 1 subtle edge catch (~35%), 2 stronger catch (~15%)."""
     v = _seed(key, 401) % 20
-    if v < 14:
+    if v < 10:
         return 0
-    if v < 18:
+    if v < 17:
         return 1
     return 2
 
@@ -71,7 +71,7 @@ def clear_reflection_mask(key: str) -> Image.Image:
     edge = inner_edge(ENCL, 2.2 if style == 1 else 3.0)
     edge = edge.filter(ImageFilter.GaussianBlur(1.2 if style == 1 else 1.8))
     mask = inter(inter(edge, _top_weight(.52)), _horizontal_weight(left))
-    strength = .12 if style == 1 else .18
+    strength = .14 if style == 1 else .20
     return mask.point(lambda v: int(v * strength))
 
 
@@ -86,12 +86,12 @@ def _soft_inner_band(mask: Image.Image, edge_px: int, blur_px: int) -> Image.Ima
 
 @lru_cache(maxsize=1)
 def _enclosure_density() -> Image.Image:
-    # Centre is nearly clear; material presence comes from optical thickness at
-    # curved edges rather than a uniform grey plate.
+    # Centre stays nearly clear. Slightly stronger curved-edge optical thickness
+    # makes the lens read as glass without turning it into a milky plate.
     density = Image.new('L', (WORK, WORK), 5)
-    wide = _soft_inner_band(ENCL, 7, 20).point(lambda v: int(v * .075))
-    tight = _soft_inner_band(ENCL, 2, 4).point(lambda v: int(v * .075))
-    top = _top_weight(2.7).point(lambda v: int(v * .008))
+    wide = _soft_inner_band(ENCL, 7, 20).point(lambda v: int(v * .09))
+    tight = _soft_inner_band(ENCL, 2, 4).point(lambda v: int(v * .10))
+    top = _top_weight(2.7).point(lambda v: int(v * .010))
     density = ImageChops.add(density, wide, scale=1.0, offset=0)
     density = ImageChops.add(density, tight, scale=1.0, offset=0)
     density = ImageChops.add(density, top, scale=1.0, offset=0)
@@ -151,12 +151,12 @@ def clear_background(key: str) -> Image.Image:
         white.putalpha(reflection)
         canvas.alpha_composite(white)
 
-    top_edge = inter(top_facing_edge(ENCL, 2.0), _top_weight(.55)).point(lambda v: int(v * .24))
+    top_edge = inter(top_facing_edge(ENCL, 2.0), _top_weight(.55)).point(lambda v: int(v * .30))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
 
-    low_edge = inter(bottom_facing_edge(ENCL, 1.1), _bottom_weight(1.5)).point(lambda v: int(v * .018))
+    low_edge = inter(bottom_facing_edge(ENCL, 1.1), _bottom_weight(1.5)).point(lambda v: int(v * .025))
     shade = Image.new('RGBA', (WORK, WORK), (48, 48, 48, 0))
     shade.putalpha(low_edge)
     canvas.alpha_composite(shade)
@@ -164,7 +164,7 @@ def clear_background(key: str) -> Image.Image:
 
 
 def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
-    hair = inter(outer_edge(ENCL, .75), _top_weight(.60)).point(lambda v: int(v * .10))
+    hair = inter(outer_edge(ENCL, .75), _top_weight(.60)).point(lambda v: int(v * .13))
     rim = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     rim.putalpha(hair)
     canvas.alpha_composite(rim)
@@ -217,8 +217,11 @@ def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | Non
     size = base.size[0]
     dx, dy = _enclosure_displacement(size)
     warped = _bilinear_warp(arr, dx, dy)
+    # A very small optical blur is applied only to the refracted patch. It is
+    # intentionally weaker than a frosted-glass blur and preserves wallpaper detail.
+    warped_img = Image.fromarray(warped, 'RGB').filter(ImageFilter.GaussianBlur(max(.35, size * .0025)))
     encl = ENCL.resize(base.size, Image.Resampling.LANCZOS)
-    result = Image.composite(Image.fromarray(warped, 'RGB'), base, encl)
+    result = Image.composite(warped_img, base, encl)
 
     if foreground_mask is not None and foreground_mask.getbbox():
         dx2, dy2, alpha = _mask_gradient_displacement(foreground_mask, size)
