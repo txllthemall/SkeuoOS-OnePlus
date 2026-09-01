@@ -18,23 +18,24 @@ from liquid27.catalog import ICON_SPECS
 OUTDIR = ROOT / 'build/liquid27-v4/clear'
 
 
+def _rails(d: ImageDraw.ImageDraw, w: int, h: int, light=(240, 238, 240), dark=(38, 37, 43)) -> None:
+    d.arc((-320, -260, 900, 680), 8, 125, fill=light, width=6)
+    d.arc((-200, 300, 1320, 1200), 6, 126, fill=light, width=5)
+    d.arc((250, 790, 1510, 1820), 194, 316, fill=light, width=5)
+    d.line((0, int(h * .53), w, int(h * .43)), fill=dark, width=11)
+
+
 def _color_test_wallpaper(w: int = 1080, h: int = 1640) -> Image.Image:
-    """High-saturation four-region wallpaper for validating colorless Clear glass."""
+    """Four-region wallpaper: purple, pink/red, blue and warm/orange."""
     wall = Image.new('RGB', (w, h), (92, 70, 104))
     d = ImageDraw.Draw(wall)
     half_w = w // 2
     half_h = h // 2
-    d.rectangle((0, 0, half_w, half_h), fill=(111, 75, 144))       # purple
-    d.rectangle((half_w, 0, w, half_h), fill=(181, 70, 91))       # pink/red
-    d.rectangle((0, half_h, half_w, h), fill=(52, 102, 166))      # blue
-    d.rectangle((half_w, half_h, w, h), fill=(190, 112, 48))     # warm/orange
-
-    # High-contrast rails make optical displacement visible inside icon lenses.
-    rail = (240, 238, 240)
-    d.arc((-320, -260, 900, 680), 8, 125, fill=rail, width=6)
-    d.arc((-200, 300, 1320, 1200), 6, 126, fill=rail, width=5)
-    d.arc((250, 790, 1510, 1820), 194, 316, fill=rail, width=5)
-    d.line((0, int(h * .53), w, int(h * .43)), fill=(38, 37, 43), width=11)
+    d.rectangle((0, 0, half_w, half_h), fill=(111, 75, 144))
+    d.rectangle((half_w, 0, w, half_h), fill=(181, 70, 91))
+    d.rectangle((0, half_h, half_w, h), fill=(52, 102, 166))
+    d.rectangle((half_w, half_h, w, h), fill=(190, 112, 48))
+    _rails(d, w, h)
     return wall
 
 
@@ -43,8 +44,25 @@ def _neutral_test_wallpaper(w: int = 1080, h: int = 1640) -> Image.Image:
     d = ImageDraw.Draw(wall)
     d.rectangle((0, 0, w // 2, h), fill=(104, 104, 104))
     d.rectangle((w // 2, 0, w, h), fill=(152, 152, 152))
-    d.arc((-300, -250, 900, 700), 8, 125, fill=(224, 224, 224), width=6)
-    d.arc((180, 700, 1450, 1770), 195, 315, fill=(66, 66, 66), width=7)
+    _rails(d, w, h, light=(224, 224, 224), dark=(66, 66, 66))
+    return wall
+
+
+def _single_wallpaper(kind: str, w: int = 1080, h: int = 1640) -> Image.Image:
+    palettes = {
+        'warm': ((102, 69, 49), (186, 124, 70), (75, 49, 39)),
+        'blue': ((29, 63, 120), (54, 112, 190), (21, 43, 82)),
+        'dark': ((18, 18, 21), (42, 43, 49), (8, 9, 12)),
+        'bright': ((232, 229, 224), (250, 247, 240), (207, 211, 218)),
+    }
+    base, accent, low = palettes[kind]
+    wall = Image.new('RGB', (w, h), base)
+    d = ImageDraw.Draw(wall)
+    d.ellipse((-280, -220, int(w * .78), int(h * .62)), fill=accent)
+    d.ellipse((int(w * .35), int(h * .42), int(w * 1.28), int(h * 1.08)), fill=low)
+    light = (246, 244, 242) if kind != 'bright' else (112, 112, 118)
+    dark = (25, 24, 28) if kind != 'dark' else (180, 182, 188)
+    _rails(d, w, h, light=light, dark=dark)
     return wall
 
 
@@ -86,16 +104,14 @@ def main() -> None:
     OUTDIR.mkdir(parents=True, exist_ok=True)
     images = _images()
 
-    color = _render_grid(_color_test_wallpaper(), images, GEOMETRY_FOCUS)
-    color.save(OUTDIR / 'preview_color_wallpaper.png')
+    _render_grid(_color_test_wallpaper(), images, GEOMETRY_FOCUS).save(OUTDIR / 'preview_color_wallpaper.png')
+    _render_grid(_color_test_wallpaper(1080, 1920), images, HOME_SHOW, home=True).save(OUTDIR / 'preview_home_color.png')
+    _render_grid(_neutral_test_wallpaper(), images, GEOMETRY_FOCUS).save(OUTDIR / 'preview_neutral_wallpaper.png')
 
-    home_color = _render_grid(_color_test_wallpaper(1080, 1920), images, HOME_SHOW, home=True)
-    home_color.save(OUTDIR / 'preview_home_color.png')
+    for kind in ('warm', 'blue', 'dark', 'bright'):
+        _render_grid(_single_wallpaper(kind), images, GEOMETRY_FOCUS).save(OUTDIR / f'preview_{kind}_wallpaper.png')
 
-    neutral = _render_grid(_neutral_test_wallpaper(), images, GEOMETRY_FOCUS)
-    neutral.save(OUTDIR / 'preview_neutral_wallpaper.png')
-
-    print('Generated Clear validation previews: color, home color, neutral.')
+    print('Generated Clear validation previews: color, home color, neutral, warm, blue, dark, bright.')
 
 
 if __name__ == '__main__':
