@@ -6,12 +6,19 @@ on:
     paths:
       - 'tools/liquid27/clear_material.py'
       - 'tools/liquid27/glyphs_brand_curated.py'
+      - 'tools/liquid27/glyphs_brand_fixes.py'
+      - 'tools/liquid27/glyphs_brand_precision.py'
       - 'tools/liquid27/glyphs_vector_complete.py'
+      - 'tools/liquid27/geometry_meta.py'
       - 'tools/generate_liquid27.py'
       - 'tools/generate_liquid27_release.py'
       - 'tools/preview_clear_v41.py'
       - '.github/workflows/clear-preview.yml'
   workflow_dispatch:
+
+concurrency:
+  group: clear-v41-preview-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   preview:
