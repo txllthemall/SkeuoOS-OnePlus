@@ -72,7 +72,9 @@ def _gamehub():
 
 
 def _playstore():
-    target = (246, 226, 894, 798)
+    # QA follow-up: the previous fit sat just over the +5% right-offset gate.
+    # Keep scale unchanged and nudge the complete four-part mark left in vector space.
+    target = (238, 226, 886, 798)
     return [
         _glass(path_mask(GOOGLE_PLAY_LEFT_D, viewbox=(0, 0, 24, 24), target=target), '#34a853', .90, .082),
         _glass(path_mask(GOOGLE_PLAY_TOP_D, viewbox=(0, 0, 24, 24), target=target), '#fbbc04', .90, .082),
