@@ -176,13 +176,15 @@ def background(spec):
 
 def _max_filter(mask, px):
     n = max(3, sx(px) * 2 + 1)
-    if n % 2 == 0: n += 1
+    if n % 2 == 0:
+        n += 1
     return mask.filter(ImageFilter.MaxFilter(n))
 
 
 def _min_filter(mask, px):
     n = max(3, sx(px) * 2 + 1)
-    if n % 2 == 0: n += 1
+    if n % 2 == 0:
+        n += 1
     return mask.filter(ImageFilter.MinFilter(n))
 
 
@@ -208,8 +210,6 @@ def _vertical_weight(top=True):
 
 
 def finish_enclosure(canvas):
-    # Static approximation of the system enclosure: directional material response,
-    # not a visible chrome/metal border.
     grad = Image.linear_gradient('L').resize((WORK, WORK))
     grad = ImageOps.invert(grad).point(lambda v: int((v/255.0)**3 * 20))
     grad = inter(grad, ENCL)
@@ -224,18 +224,29 @@ def finish_enclosure(canvas):
     canvas.putalpha(ENCL)
 
 
+def _masked_source_alpha(image, mask, factor=1.0):
+    """Clip by mask without turning transparent source pixels opaque."""
+    source_alpha = image.getchannel('A')
+    gate = mask.point(lambda v: int(v * max(0.0, min(1.0, factor))))
+    image.putalpha(inter(source_alpha, gate))
+    return image
+
+
 def _lens_refract(under, mask, strength=.045, offset=(0,0), blur=0):
     bb = mask.getbbox()
     if not bb or strength <= 0:
-        out = under.copy(); out.putalpha(mask); return out
-    cx = (bb[0]+bb[2])/2; cy = (bb[1]+bb[3])/2
+        return _masked_source_alpha(under.copy(), mask, 1.0)
+    cx = (bb[0]+bb[2])/2
+    cy = (bb[1]+bb[3])/2
     scale = 1.0 + min(.18, max(0.0, strength))
-    a = 1/scale; e = 1/scale
-    c = cx - cx*a - sx(offset[0]); f = cy - cy*e - sx(offset[1])
+    a = 1/scale
+    e = 1/scale
+    c = cx - cx*a - sx(offset[0])
+    f = cy - cy*e - sx(offset[1])
     refr = under.transform((WORK,WORK), Image.Transform.AFFINE, (a,0,c,0,e,f), resample=Image.Resampling.BICUBIC)
-    if blur: refr = refr.filter(ImageFilter.GaussianBlur(max(.1, sx(blur))))
-    refr.putalpha(mask.point(lambda v: int(v*.92)))
-    return refr
+    if blur:
+        refr = refr.filter(ImageFilter.GaussianBlur(max(.1, sx(blur))))
+    return _masked_source_alpha(refr, mask, .92)
 
 
 def _apply_blend(canvas, layer, mode):
@@ -256,11 +267,34 @@ def _surface_sheen(mask, strength=.18):
     return inter(mask, y).filter(ImageFilter.GaussianBlur(max(1, sx(1.0))))
 
 
+def _reflection_field(mask, strength=.22):
+    """Broad and narrow reflected-light bands; not a uniform white overlay."""
+    field = blank_mask()
+    d = ImageDraw.Draw(field)
+    s = max(0.0, min(1.0, strength))
+    d.polygon([(-180, 230), (20, -80), (980, 500), (780, 760)], fill=int(255 * .34 * s))
+    d.polygon([(360, -120), (520, -120), (1040, 360), (1040, 500)], fill=int(255 * .25 * s))
+    d.ellipse((590, -180, 1110, 330), fill=int(255 * .20 * s))
+    field = field.filter(ImageFilter.GaussianBlur(max(1, sx(46))))
+    return inter(field, mask)
+
+
+def _clear_dark_reflection(mask, strength=.12):
+    field = blank_mask()
+    d = ImageDraw.Draw(field)
+    d.ellipse((500, 520, 1180, 1180), fill=int(255 * max(0.0, min(1.0, strength))))
+    field = field.filter(ImageFilter.GaussianBlur(max(1, sx(90))))
+    return inter(field, mask)
+
+
 def composite_layer(canvas, mask, *, fill='#ffffff', material='glass', opacity=.78,
                     refraction=.065, refract_offset=(0,0), blur=0, specular='automatic',
                     shadow=.035, blend='normal', shadow_offset=2.0, shadow_blur=5.0):
     under = canvas.copy()
     color = rgb(fill)
+    # Clear pack starts from a genuinely translucent enclosure; color pack is opaque in the center.
+    clear_context = under.getchannel('A').getpixel((WORK // 2, WORK // 2)) < 220
+
     if shadow and material != 'ink':
         sm = shifted(mask, 0, shadow_offset).filter(ImageFilter.GaussianBlur(max(1, sx(shadow_blur))))
         sm = sm.point(lambda v: int(v * min(.11, shadow)))
@@ -269,54 +303,98 @@ def composite_layer(canvas, mask, *, fill='#ffffff', material='glass', opacity=.
     layer_img = Image.new('RGBA', (WORK,WORK), (0,0,0,0))
     if material == 'glass':
         refr = _lens_refract(under, mask, max(.02, refraction), refract_offset, blur)
-        refr = ImageEnhance.Contrast(refr).enhance(1.035)
-        refr = ImageEnhance.Color(refr).enhance(1.06)
+        refr = ImageEnhance.Contrast(refr).enhance(1.04 if clear_context else 1.035)
+        refr = ImageEnhance.Color(refr).enhance(1.02 if clear_context else 1.06)
         layer_img.alpha_composite(refr)
+
         if refraction > .02:
-            edge_band = inner_edge(mask, 10.0)
-            strong = _lens_refract(under, edge_band, min(.16, refraction*1.75), (refract_offset[0]-1.5, refract_offset[1]-1.0), blur)
-            strong = ImageEnhance.Contrast(strong).enhance(1.08)
-            strong = ImageEnhance.Color(strong).enhance(1.12)
-            strong.putalpha(edge_band.point(lambda v: int(v*.72)))
+            edge_band = inner_edge(mask, 12.0 if clear_context else 10.0)
+            strong = _lens_refract(
+                under,
+                edge_band,
+                min(.19 if clear_context else .16, refraction * (2.05 if clear_context else 1.75)),
+                (refract_offset[0]-1.8, refract_offset[1]-1.2),
+                blur,
+            )
+            strong = ImageEnhance.Contrast(strong).enhance(1.10 if clear_context else 1.08)
+            strong = ImageEnhance.Color(strong).enhance(1.04 if clear_context else 1.12)
+            strong = _masked_source_alpha(strong, edge_band, .82 if clear_context else .72)
             layer_img.alpha_composite(strong)
 
         luma = luminance(color)
-        material_alpha = opacity * (.46 if luma >= 228 else .62)
-        material_alpha = max(.24, min(.76, material_alpha))
-        tint = Image.new('RGBA', (WORK,WORK), (*color,0)); tint.putalpha(mask.point(lambda v: int(v*material_alpha))); layer_img.alpha_composite(tint)
-        sheen = _surface_sheen(mask, .115 if luma > 210 else .085)
+        if clear_context:
+            material_alpha = opacity * (.27 if luma >= 228 else .34)
+            material_alpha = max(.07, min(.42, material_alpha))
+        else:
+            material_alpha = opacity * (.46 if luma >= 228 else .62)
+            material_alpha = max(.24, min(.76, material_alpha))
+
+        tint = Image.new('RGBA', (WORK,WORK), (*color,0))
+        tint.putalpha(mask.point(lambda v: int(v * material_alpha)))
+        layer_img.alpha_composite(tint)
+
+        sheen_strength = (.21 if luma > 210 else .16) if clear_context else (.115 if luma > 210 else .085)
+        sheen = _surface_sheen(mask, sheen_strength)
         white = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); white.putalpha(sheen); layer_img.alpha_composite(white)
 
+        if clear_context:
+            reflect = _reflection_field(mask, .95)
+            cool = Image.new('RGBA', (WORK,WORK), (236,246,255,0)); cool.putalpha(reflect); layer_img.alpha_composite(cool)
+            dark = _clear_dark_reflection(mask, .10)
+            dk2 = Image.new('RGBA', (WORK,WORK), (74,82,96,0)); dk2.putalpha(dark); layer_img.alpha_composite(dk2)
+
         mode = specular
-        if mode == 'automatic': mode = 'inside' if luma >= 150 else 'outside'
+        if mode == 'automatic':
+            mode = 'inside' if luma >= 150 else 'outside'
         if mode != 'off':
-            edge = top_facing_edge(mask, 3.8) if mode == 'inside' else outer_edge(mask, 2.6)
-            edge = inter(edge, _vertical_weight(True)).point(lambda v: int(v * (.92 if luma > 180 else .78)))
+            edge = top_facing_edge(mask, 4.4 if clear_context else 3.8) if mode == 'inside' else outer_edge(mask, 3.1 if clear_context else 2.6)
+            edge = inter(edge, _vertical_weight(True)).point(
+                lambda v: int(v * (1.0 if clear_context else (.92 if luma > 180 else .78)))
+            )
             hi = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); hi.putalpha(edge); layer_img.alpha_composite(hi)
-            rim = inter(inner_edge(mask, 2.1), _vertical_weight(True)).point(lambda v: int(v*.42))
-            rim_color = mix(color, (255,255,255), .58)
+
+            rim_strength = .62 if clear_context else .42
+            rim = inter(inner_edge(mask, 2.4 if clear_context else 2.1), _vertical_weight(True)).point(lambda v: int(v * rim_strength))
+            rim_color = mix(color, (255,255,255), .72 if clear_context else .58)
             ri = Image.new('RGBA', (WORK,WORK), (*rim_color,0)); ri.putalpha(rim); layer_img.alpha_composite(ri)
-            hair = outer_edge(mask, 1.1).point(lambda v: int(v*.26))
-            hc = mix(color, (255,255,255), .46)
+
+            hair = outer_edge(mask, 1.2).point(lambda v: int(v * (.38 if clear_context else .26)))
+            hc = mix(color, (255,255,255), .62 if clear_context else .46)
             ho = Image.new('RGBA', (WORK,WORK), (*hc,0)); ho.putalpha(hair); layer_img.alpha_composite(ho)
-            low = inter(bottom_facing_edge(mask, 2.0), _vertical_weight(False)).point(lambda v: int(v*.17))
+
+            low = inter(bottom_facing_edge(mask, 2.0), _vertical_weight(False)).point(lambda v: int(v * (.12 if clear_context else .17)))
             dk = Image.new('RGBA', (WORK,WORK), (0,0,0,0)); dk.putalpha(low); layer_img.alpha_composite(dk)
     else:
         alpha = mask.point(lambda v: int(v * max(.0, min(1.0, opacity))))
         tint = Image.new('RGBA', (WORK,WORK), (*color,0)); tint.putalpha(alpha); layer_img.alpha_composite(tint)
+
     _apply_blend(canvas, layer_img, blend)
 
 
 def text_mask(text, size=260, yoff=0, bold=True):
     font = ImageFont.truetype(FONT_BOLD if bold else FONT_REG, sx(size))
-    m = blank_mask(); d = ImageDraw.Draw(m); box = d.textbbox((0,0), text, font=font)
-    x = (WORK-(box[2]-box[0]))/2-box[0]; y = (WORK-(box[3]-box[1]))/2-box[1]+sx(yoff)
+    m = blank_mask()
+    d = ImageDraw.Draw(m)
+    box = d.textbbox((0,0), text, font=font)
+    x = (WORK-(box[2]-box[0]))/2-box[0]
+    y = (WORK-(box[3]-box[1]))/2-box[1]+sx(yoff)
     d.text((x,y), text, font=font, fill=255)
     return m
 
 
 def layer(mask, fill='#fff', opacity=.88, refraction=.045, specular='automatic', shadow=.05,
           material='glass', blend='normal', offset=(0,0), blur=0, shadow_offset=3.0, shadow_blur=7.0):
-    return dict(mask=mask, fill=fill, opacity=opacity, refraction=refraction, specular=specular,
-                shadow=shadow, material=material, blend=blend, refract_offset=offset, blur=blur,
-                shadow_offset=shadow_offset, shadow_blur=shadow_blur)
+    return dict(
+        mask=mask,
+        fill=fill,
+        opacity=opacity,
+        refraction=refraction,
+        specular=specular,
+        shadow=shadow,
+        material=material,
+        blend=blend,
+        refract_offset=offset,
+        blur=blur,
+        shadow_offset=shadow_offset,
+        shadow_blur=shadow_blur,
+    )
