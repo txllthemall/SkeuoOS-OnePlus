@@ -28,7 +28,9 @@ jobs:
       - name: Install icon tooling
         run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
       - name: Generate Color and Clear Liquid27 resources
-        run: python3 tools/generate_liquid27.py --variant all
+        run: |
+          python3 tools/generate_liquid27.py --variant all
+          cp build/liquid27-v4/clear/preview_clear_light.png build/liquid27-v4/clear/preview_clear_flat.png
       - name: Normalize OxygenOS icon mappings
         run: |
           python3 tools/normalize_appfilter.py
