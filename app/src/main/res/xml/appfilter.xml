@@ -47,16 +47,16 @@
     <item component="ComponentInfo{com.google.android.apps.weather/com.google.android.apps.weather.WeatherActivity}" drawable="skeuo_weather" />
     <item component="ComponentInfo{com.coloros.weather2/com.coloros.weather2.MainActivity}" drawable="skeuo_weather" />
     <item component="ComponentInfo{com.oplus.weather/com.oplus.weather.MainActivity}" drawable="skeuo_weather" />
-    <item component="ComponentInfo{com.google.android.keep/com.google.android.keep.activities.BrowseActivity}" drawable="skeuo_notes" />
+    <item component="ComponentInfo{com.google.android.keep/com.google.android.keep.activities.BrowseActivity}" drawable="skeuo_google_keep" />
     <item component="ComponentInfo{md.obsidian/md.obsidian.MainActivity}" drawable="skeuo_notes" />
     <item component="ComponentInfo{notion.id/notion.id.MainActivity}" drawable="skeuo_notes" />
     <item component="ComponentInfo{com.microsoft.office.onenote/com.microsoft.office.onenote.MainActivity}" drawable="skeuo_notes" />
-    <item component="ComponentInfo{com.google.android.calendar/com.android.calendar.AllInOneActivity}" drawable="skeuo_calendar" />
+    <item component="ComponentInfo{com.google.android.calendar/com.android.calendar.AllInOneActivity}" drawable="skeuo_google_calendar" />
     <item component="ComponentInfo{com.oneplus.calendar/com.oneplus.calendar.MainActivity}" drawable="skeuo_calendar" />
     <item component="ComponentInfo{com.coloros.calendar/com.coloros.calendar.MainActivity}" drawable="skeuo_calendar" />
     <item component="ComponentInfo{com.oplus.calendar/com.oplus.calendar.MainActivity}" drawable="skeuo_calendar" />
-    <item component="ComponentInfo{com.android.vending/com.google.android.finsky.activities.MainActivity}" drawable="skeuo_appstore" />
-    <item component="ComponentInfo{com.android.vending/com.android.vending.AssetBrowserActivity}" drawable="skeuo_appstore" />
+    <item component="ComponentInfo{com.android.vending/com.google.android.finsky.activities.MainActivity}" drawable="skeuo_playstore" />
+    <item component="ComponentInfo{com.android.vending/com.android.vending.AssetBrowserActivity}" drawable="skeuo_playstore" />
     <item component="ComponentInfo{com.aurora.store/com.aurora.store.view.ui.splash.SplashActivity}" drawable="skeuo_appstore" />
     <item component="ComponentInfo{org.fdroid.fdroid/org.fdroid.fdroid.views.main.MainActivity}" drawable="skeuo_appstore" />
     <item component="ComponentInfo{com.google.android.apps.youtube.music/com.google.android.apps.youtube.music.activities.MusicActivity}" drawable="skeuo_music" />
@@ -76,7 +76,7 @@
     <item component="ComponentInfo{com.coloros.calculator/com.coloros.calculator.MainActivity}" drawable="skeuo_calculator" />
     <item component="ComponentInfo{com.oplus.calculator/com.oplus.calculator.MainActivity}" drawable="skeuo_calculator" />
     <item component="ComponentInfo{com.google.android.apps.fitness/com.google.android.apps.fitness.FitMainActivity}" drawable="skeuo_health" />
-    <item component="ComponentInfo{com.strava/com.strava.ui.splash.SplashActivity}" drawable="skeuo_health" />
+    <item component="ComponentInfo{com.strava/com.strava.ui.splash.SplashActivity}" drawable="skeuo_strava" />
     <item component="ComponentInfo{com.android.soundrecorder/com.android.soundrecorder.SoundRecorder}" drawable="skeuo_recorder" />
     <item component="ComponentInfo{com.google.android.apps.recorder/com.google.android.apps.recorder.activity.MainActivity}" drawable="skeuo_recorder" />
     <item component="ComponentInfo{com.coloros.soundrecorder/com.coloros.soundrecorder.SoundRecorder}" drawable="skeuo_recorder" />
