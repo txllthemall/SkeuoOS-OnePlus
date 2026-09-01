@@ -15,7 +15,7 @@ STRICT_GEOMETRY = {
 
 
 def mapping_checks(errors):
-    appfilter = (ROOT / 'app/src/main/res/xml/appfilter.xml').read_text(encoding='utf-8')
+    appfilter = (ROOT / 'app/src/main/assets/appfilter.xml').read_text(encoding='utf-8')
     required = {
         'com.android.vending/com.google.android.finsky.activities.MainActivity': 'skeuo_playstore',
         'com.google.android.keep/com.google.android.keep.activities.BrowseActivity': 'skeuo_google_keep',
@@ -26,7 +26,8 @@ def mapping_checks(errors):
         needle = f'ComponentInfo{{{component}}}" drawable="{drawable}"'
         if needle not in appfilter:
             errors.append(f'Wrong/missing appfilter mapping: {component} -> {drawable}')
-    if 'ComponentInfo{com.android.vending/' in appfilter and 'ComponentInfo{com.android.vending/com.google.android.finsky.activities.MainActivity}" drawable="skeuo_appstore"' in appfilter:
+    wrong_play = 'ComponentInfo{com.android.vending/com.google.android.finsky.activities.MainActivity}" drawable="skeuo_appstore"'
+    if wrong_play in appfilter:
         errors.append('Google Play regressed to generic App Store mapping')
 
 
@@ -34,7 +35,7 @@ def check_variant(variant):
     base = ROOT / f'build/liquid27-v4/{variant}'
     report = base / 'qa.json'
     if not report.exists():
-        raise SystemExit(f'Missing {variant} QA report; run tools/generate_liquid27.py --variant all first')
+        raise SystemExit(f'Missing {variant} QA report; run the release generator first')
     rows = json.loads(report.read_text(encoding='utf-8'))
     if len(rows) < 30:
         raise SystemExit(f'{variant}: only {len(rows)} QA rows; expected complete icon pack')
@@ -45,8 +46,8 @@ def check_variant(variant):
     median = statistics.median(coverage)
     errors = []
     warnings = []
-
     by_name = {r['icon']: r for r in rows}
+
     for r in rows:
         x, y = r['center_offset_pct']
         c = r['coverage_pct']
@@ -63,6 +64,8 @@ def check_variant(variant):
             warnings.append(f"{r['icon']}: foreground coverage {c}% vs median {median}%")
         if k < 0.10:
             warnings.append(f"{r['icon']}: low contrast estimate {k}")
+        if not str(r.get('geometry_engine', '')).startswith('svg2048'):
+            errors.append(f"{r['icon']}: legacy/non-vector geometry is forbidden")
 
     for name in [
         'preview_full.png', 'preview_light.png', 'preview_dark.png',
@@ -79,14 +82,13 @@ def check_variant(variant):
             errors.append(f'Clear pack is too opaque: mean alpha {mean_alpha:.1f}')
         if mean_alpha <= 18:
             errors.append(f'Clear pack is too faint: mean alpha {mean_alpha:.1f}')
-    else:
-        if mean_alpha <= 145:
-            warnings.append(f'Color pack unexpectedly transparent: mean alpha {mean_alpha:.1f}')
+    elif mean_alpha <= 145:
+        warnings.append(f'Color pack unexpectedly transparent: mean alpha {mean_alpha:.1f}')
 
     svg_count = sum(1 for r in rows if str(r.get('geometry_engine', '')).startswith('svg2048'))
     curated_count = sum(1 for r in rows if r.get('geometry_engine') == 'svg2048-curated')
-    if svg_count < 24:
-        errors.append(f'Only {svg_count} SVG2048 glyphs; vector set regressed')
+    if svg_count != len(rows):
+        errors.append(f'Vector coverage incomplete: {svg_count}/{len(rows)}; release requires 100% SVG2048')
     if curated_count < 14:
         errors.append(f'Only {curated_count} reviewed brand glyphs; expected at least 14')
 
@@ -94,10 +96,7 @@ def check_variant(variant):
         row = by_name.get(icon)
         if not row:
             errors.append(f'Missing strict geometry row: {icon}')
-        elif row.get('geometry_engine') == 'legacy':
-            errors.append(f'{icon}: legacy geometry is forbidden')
 
-    # Gmail must remain a dedicated M geometry, not Mail.
     gmail = by_name.get('skeuo_gmail')
     mail = by_name.get('skeuo_mail')
     if not gmail or gmail.get('kind') != 'gmail':
@@ -107,7 +106,7 @@ def check_variant(variant):
 
     mapping_checks(errors)
 
-    print(f'Liquid27 {variant} QA: {len(rows)} icons; {svg_count} SVG2048; {curated_count} curated; median coverage {median:.1f}%; mean contrast {statistics.mean(contrast):.3f}; mean alpha {mean_alpha:.1f}')
+    print(f'Liquid27 {variant} QA: {len(rows)} icons; {svg_count}/{len(rows)} SVG2048; {curated_count} curated; median coverage {median:.1f}%; mean contrast {statistics.mean(contrast):.3f}; mean alpha {mean_alpha:.1f}')
     for w in warnings:
         print('WARN', variant, w)
     if errors:
