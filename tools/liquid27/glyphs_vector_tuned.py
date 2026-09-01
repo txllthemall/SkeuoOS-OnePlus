@@ -37,12 +37,13 @@ def glyph_vector_tuned(kind):
 
     if kind == 'telegram':
         # The paper plane is intrinsically right-heavy. A mathematical bbox
-        # center looks visibly right-shifted at 48-64 px, so the source-vector
-        # fit is moved left before Cairo rasterization (not after rasterization).
+        # center looks visually off at 48-64 px, so placement is corrected in
+        # vector space. The +10 px adjustment here is the QA follow-up after
+        # the previous correction overshot slightly to the left.
         plane = path_mask(
             TELEGRAM_PLANE_D,
             viewbox=(112, 157, 258, 218),
-            target=(105, 205, 795, 820),
+            target=(115, 205, 805, 820),
         )
         return [gl(plane, '#fff', .88, .105, 'outside', .018)]
 
