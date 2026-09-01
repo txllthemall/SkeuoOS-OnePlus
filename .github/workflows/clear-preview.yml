@@ -22,7 +22,9 @@ jobs:
       - name: Install icon tooling
         run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
       - name: Render canonical Clear representative set
-        run: python3 tools/generate_liquid27.py --variant clear --quick
+        run: |
+          python3 tools/generate_liquid27.py --variant clear --quick
+          cp build/liquid27-v4/clear/preview_clear_light.png build/liquid27-v4/clear/preview_clear_flat.png
       - uses: actions/upload-artifact@v4
         with:
           name: SkeuoOS-Clear-v4.1-quick-preview
@@ -32,4 +34,4 @@ jobs:
             build/liquid27-v4/clear/preview_home_clear.png
             build/liquid27-v4/clear/preview_clear_flat.png
             build/liquid27-v4/clear/qa.tsv
-          if-no-files-found: warn
+          if-no-files-found: error
