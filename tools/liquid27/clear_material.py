@@ -52,21 +52,14 @@ def _horizontal_weight(left: bool) -> Image.Image:
 
 
 def reflection_style(key: str) -> int:
-    """0 none (~25%), 1 subtle edge catch (~50%), 2 stronger catch (~25%)."""
-    v = _seed(key, 401) % 20
-    if v < 5:
-        return 0
-    if v < 15:
-        return 1
-    return 2
+    """1 subtle edge catch (~80%), 2 stronger catch (~20%)."""
+    return 2 if (_seed(key, 401) % 10) >= 8 else 1
 
 
 @lru_cache(maxsize=256)
 def clear_reflection_mask(key: str) -> Image.Image:
     """Environmental response derived only from the real enclosure edge."""
     style = reflection_style(key)
-    if style == 0:
-        return blank_mask()
     left = bool(_seed(key, 409) & 1)
     edge = inner_edge(ENCL, 2.2 if style == 1 else 3.0)
     edge = edge.filter(ImageFilter.GaussianBlur(1.2 if style == 1 else 1.8))
@@ -99,9 +92,9 @@ def _enclosure_density() -> Image.Image:
 
 
 def _glyph_density(source_mask: Image.Image) -> Image.Image:
-    base = Image.new('L', (WORK, WORK), 190)
-    top = _top_weight(2.0).point(lambda v: int(v * .030))
-    edge = _soft_inner_band(source_mask, 5, 9).point(lambda v: int(v * .16))
+    base = Image.new('L', (WORK, WORK), 182)
+    top = _top_weight(2.0).point(lambda v: int(v * .032))
+    edge = _soft_inner_band(source_mask, 5, 9).point(lambda v: int(v * .18))
     field = ImageChops.add(base, top, scale=1.0, offset=0)
     field = ImageChops.add(field, edge, scale=1.0, offset=0)
     return inter(source_mask, field)
@@ -111,6 +104,7 @@ def clearify_layers(layers, key: str):
     """Convert shared geometry into colorless Clear material without decorative blobs."""
     result = []
     top_weight = _top_weight(.72)
+    bottom_weight = _bottom_weight(.72)
     for src in layers:
         item = dict(src)
         source_mask = item['mask']
@@ -120,8 +114,8 @@ def clearify_layers(layers, key: str):
         # Equal-channel fills keep intrinsic material neutral; wallpaper is the
         # only allowed source of hue in the clear treatment.
         item['fill'] = '#e2e2e2' if source_luma < 145 else '#f4f4f4'
-        item['opacity'] = .30 if source_luma < 145 else .34
-        item['refraction'] = max(.12, min(.17, float(item.get('refraction', .06)) * 1.55))
+        item['opacity'] = .24 if source_luma < 145 else .28
+        item['refraction'] = max(.13, min(.18, float(item.get('refraction', .06)) * 1.65))
         item['specular'] = 'off'
         item['shadow'] = .0004
         item['blend'] = 'normal'
@@ -130,10 +124,14 @@ def clearify_layers(layers, key: str):
         item['shadow_blur'] = 1.0
         result.append(item)
 
-        # Shape-following catch only. No fake oval/ribbon highlight textures.
-        catch = inter(top_facing_edge(source_mask, 1.5), top_weight).point(lambda v: int(v * .28))
+        # Two shape-following edge cues make the glyph itself read as a clear
+        # extruded lens rather than a flat white pictogram.
+        catch = inter(top_facing_edge(source_mask, 1.5), top_weight).point(lambda v: int(v * .31))
         if catch.getbbox():
-            result.append(layer(catch, '#ffffff', .14, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
+            result.append(layer(catch, '#ffffff', .16, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
+        lower = inter(bottom_facing_edge(source_mask, 1.2), bottom_weight).point(lambda v: int(v * .20))
+        if lower.getbbox():
+            result.append(layer(lower, '#303030', .07, 0, 'off', 0, 'ink', 'multiply', (0, 0), 0, 0, 0))
     return result
 
 
@@ -149,12 +147,12 @@ def clear_background(key: str) -> Image.Image:
         white.putalpha(reflection)
         canvas.alpha_composite(white)
 
-    top_edge = inter(top_facing_edge(ENCL, 2.0), _top_weight(.55)).point(lambda v: int(v * .38))
+    top_edge = inter(top_facing_edge(ENCL, 2.0), _top_weight(.55)).point(lambda v: int(v * .40))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
 
-    low_edge = inter(bottom_facing_edge(ENCL, 1.1), _bottom_weight(1.5)).point(lambda v: int(v * .032))
+    low_edge = inter(bottom_facing_edge(ENCL, 1.1), _bottom_weight(1.5)).point(lambda v: int(v * .035))
     shade = Image.new('RGBA', (WORK, WORK), (48, 48, 48, 0))
     shade.putalpha(low_edge)
     canvas.alpha_composite(shade)
@@ -162,7 +160,7 @@ def clear_background(key: str) -> Image.Image:
 
 
 def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
-    hair = inter(outer_edge(ENCL, .75), _top_weight(.60)).point(lambda v: int(v * .16))
+    hair = inter(outer_edge(ENCL, .75), _top_weight(.60)).point(lambda v: int(v * .17))
     rim = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     rim.putalpha(hair)
     canvas.alpha_composite(rim)
@@ -187,17 +185,17 @@ def _bilinear_warp(rgb: np.ndarray, dx: np.ndarray, dy: np.ndarray) -> np.ndarra
     return np.clip(a * (1 - wy) + b * wy, 0, 255).astype(np.uint8)
 
 
-def _enclosure_displacement(size: int, strength: float = 6.8):
+def _enclosure_displacement(size: int, strength: float = 7.2):
     yy, xx = np.indices((size, size), dtype=np.float32)
     c = (size - 1) / 2.0
     xn = (xx - c) / max(c, 1.0)
     yn = (yy - c) / max(c, 1.0)
     q = (np.abs(xn) ** 4 + np.abs(yn) ** 4) ** .25
-    edge = np.clip((q - .46) / .54, 0.0, 1.0) ** 2.15
+    edge = np.clip((q - .45) / .55, 0.0, 1.0) ** 2.10
     return xn * edge * strength, yn * edge * strength * .88
 
 
-def _mask_gradient_displacement(mask: Image.Image, size: int, strength: float = 3.4):
+def _mask_gradient_displacement(mask: Image.Image, size: int, strength: float = 3.8):
     m = mask.resize((size, size), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(max(1.0, size * .010)))
     a = np.asarray(m, dtype=np.float32) / 255.0
     gy, gx = np.gradient(a)
@@ -223,7 +221,7 @@ def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | Non
         dx2, dy2, alpha = _mask_gradient_displacement(foreground_mask, size)
         arr2 = np.asarray(result, dtype=np.float32)
         warped2 = _bilinear_warp(arr2, dx2, dy2)
-        mixed = (arr2 * .42 + warped2.astype(np.float32) * .58).astype(np.uint8)
+        mixed = (arr2 * .38 + warped2.astype(np.float32) * .62).astype(np.uint8)
         fm = Image.fromarray(np.clip(alpha * 255, 0, 255).astype(np.uint8), 'L')
         result = Image.composite(Image.fromarray(mixed, 'RGB'), result, fm)
     return result
