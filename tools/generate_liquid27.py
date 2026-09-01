@@ -6,13 +6,14 @@ from liquid27.glyphs import glyph
 from liquid27.glyphs_v4 import glyph_v4
 from liquid27.glyphs_v4_extra import glyph_v4_extra
 from liquid27.glyphs_vector import glyph_vector, VECTOR_KINDS
+from liquid27.glyphs_vector_tuned import glyph_vector_tuned
 from liquid27.catalog import ICON_SPECS
 
 ROOT=Path(__file__).resolve().parents[1]
 
 
 def layers_for(kind):
-    return glyph_vector(kind) or glyph_v4(kind) or glyph_v4_extra(kind) or glyph(kind)
+    return glyph_vector_tuned(kind) or glyph_vector(kind) or glyph_v4(kind) or glyph_v4_extra(kind) or glyph(kind)
 
 
 def render(name,bgspec,kind):
@@ -41,7 +42,6 @@ def preview(images, outdir):
         can.save(outdir/name)
     sheet('preview_light.png','#eff0f3'); sheet('preview_dark.png','#17181c')
 
-    # The 12 geometry references are reviewed separately before any release.
     vector_names=[name for name,(_,kind,_) in ICON_SPECS.items() if kind in VECTOR_KINDS]
     sheet('preview_vector_reference.png','#17181c',vector_names,cols=4,icon_size=144)
 
