@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: liquid27-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -45,14 +49,18 @@ jobs:
             build/liquid27-v4/color/preview_geometry_focus.png
             build/liquid27-v4/color/preview_vector_reference.png
             build/liquid27-v4/color/preview_full.png
-            build/liquid27-v4/color/preview_home.png
-            build/liquid27-v4/color/preview_wallpaper.png
+            build/liquid27-v4/color/preview_home_color.png
+            build/liquid27-v4/color/preview_color_wallpaper.png
+            build/liquid27-v4/color/preview_color_light.png
+            build/liquid27-v4/color/preview_color_dark.png
             build/liquid27-v4/color/qa.tsv
             build/liquid27-v4/clear/preview_geometry_focus.png
             build/liquid27-v4/clear/preview_vector_reference.png
             build/liquid27-v4/clear/preview_full.png
-            build/liquid27-v4/clear/preview_home.png
-            build/liquid27-v4/clear/preview_wallpaper.png
+            build/liquid27-v4/clear/preview_home_clear.png
+            build/liquid27-v4/clear/preview_clear_wallpaper.png
+            build/liquid27-v4/clear/preview_clear_light.png
+            build/liquid27-v4/clear/preview_clear_dark.png
             build/liquid27-v4/clear/qa.tsv
             DESIGN_NOTES.md
           if-no-files-found: error
