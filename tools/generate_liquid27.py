@@ -5,13 +5,14 @@ from liquid27.material import *
 from liquid27.glyphs import glyph
 from liquid27.glyphs_v4 import glyph_v4
 from liquid27.glyphs_v4_extra import glyph_v4_extra
+from liquid27.glyphs_vector import glyph_vector, VECTOR_KINDS
 from liquid27.catalog import ICON_SPECS
 
 ROOT=Path(__file__).resolve().parents[1]
 
 
 def layers_for(kind):
-    return glyph_v4(kind) or glyph_v4_extra(kind) or glyph(kind)
+    return glyph_vector(kind) or glyph_v4(kind) or glyph_v4_extra(kind) or glyph(kind)
 
 
 def render(name,bgspec,kind):
@@ -31,14 +32,18 @@ def output_paths():
 def preview(images, outdir):
     show=['skeuo_phone','skeuo_messages','skeuo_camera','skeuo_photos','skeuo_settings','skeuo_mail','skeuo_gmail','skeuo_maps','skeuo_clock','skeuo_weather','skeuo_notes','skeuo_calendar','skeuo_appstore','skeuo_telegram','skeuo_discord','skeuo_youtube','skeuo_revanced','skeuo_chrome','skeuo_spotify','skeuo_instagram','skeuo_soundcloud','skeuo_kaspi','skeuo_2gis','skeuo_chatgpt','skeuo_gamehub']
     font=ImageFont.truetype(FONT_REG,18)
-    def sheet(name,bg):
-        cols=5; cell=190; rows=math.ceil(len(show)/cols); W=cols*cell+60; H=rows*210+60
+    def sheet(name,bg,names=show,cols=5,icon_size=132):
+        cell=190; rows=math.ceil(len(names)/cols); W=cols*cell+60; H=rows*210+60
         can=Image.new('RGB',(W,H),rgb(bg)); d=ImageDraw.Draw(can); fg=(235,235,238) if luminance(bg)<128 else (34,34,38)
-        for i,n in enumerate(show):
-            x=30+(i%cols)*cell; y=30+(i//cols)*210; ic=images[n].resize((132,132),Image.Resampling.LANCZOS); can.paste(ic,(x+29,y),ic)
-            label=n[6:].replace('_',' ')[:16]; b=d.textbbox((0,0),label,font=font); d.text((x+95-(b[2]-b[0])/2,y+145),label,font=font,fill=fg)
+        for i,n in enumerate(names):
+            x=30+(i%cols)*cell; y=30+(i//cols)*210; ic=images[n].resize((icon_size,icon_size),Image.Resampling.LANCZOS); can.paste(ic,(x+(cell-icon_size)//2,y),ic)
+            label=n[6:].replace('_',' ')[:16]; b=d.textbbox((0,0),label,font=font); d.text((x+cell/2-(b[2]-b[0])/2,y+145),label,font=font,fill=fg)
         can.save(outdir/name)
     sheet('preview_light.png','#eff0f3'); sheet('preview_dark.png','#17181c')
+
+    # The 12 geometry references are reviewed separately before any release.
+    vector_names=[name for name,(_,kind,_) in ICON_SPECS.items() if kind in VECTOR_KINDS]
+    sheet('preview_vector_reference.png','#17181c',vector_names,cols=4,icon_size=144)
 
     all_names=list(images.keys()); cols_all=6; cell_all=170; row_h=190; rows_all=math.ceil(len(all_names)/cols_all)
     full=Image.new('RGB',(cols_all*cell_all+60,rows_all*row_h+60),rgb('#17181c')); fd=ImageDraw.Draw(full); ff=ImageFont.truetype(FONT_REG,16)
@@ -74,11 +79,11 @@ def qa(images, outdir):
             cx=(bb[0]+bb[2])/2; cy=(bb[1]+bb[3])/2; off=((cx-WORK/2)/WORK,(cy-WORK/2)/WORK)
         else: off=(0,0)
         im=images[name].convert('RGB').resize((64,64)); vals=[.2126*r+.7152*g+.0722*b for r,g,b in im.getdata()]
-        rows.append({'icon':name,'foreground_bbox':bb,'coverage_pct':round(coverage*100,1),'center_offset_pct':[round(off[0]*100,1),round(off[1]*100,1)],'mean_luminance':round(sum(vals)/len(vals),1),'contrast_estimate':round((max(vals)-min(vals))/255,3)})
+        rows.append({'icon':name,'kind':kind,'geometry_engine':'svg2048' if kind in VECTOR_KINDS else 'legacy','foreground_bbox':bb,'coverage_pct':round(coverage*100,1),'center_offset_pct':[round(off[0]*100,1),round(off[1]*100,1)],'mean_luminance':round(sum(vals)/len(vals),1),'contrast_estimate':round((max(vals)-min(vals))/255,3)})
     (outdir/'qa.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
     with (outdir/'qa.tsv').open('w',encoding='utf-8') as f:
-        f.write('icon\tforeground_bbox\tcoverage_pct\tcenter_offset_pct\tmean_luminance\tcontrast_estimate\n')
-        for r in rows: f.write(f"{r['icon']}\t{r['foreground_bbox']}\t{r['coverage_pct']}\t{r['center_offset_pct']}\t{r['mean_luminance']}\t{r['contrast_estimate']}\n")
+        f.write('icon\tkind\tgeometry_engine\tforeground_bbox\tcoverage_pct\tcenter_offset_pct\tmean_luminance\tcontrast_estimate\n')
+        for r in rows: f.write(f"{r['icon']}\t{r['kind']}\t{r['geometry_engine']}\t{r['foreground_bbox']}\t{r['coverage_pct']}\t{r['center_offset_pct']}\t{r['mean_luminance']}\t{r['contrast_estimate']}\n")
     bad=[r for r in rows if r['coverage_pct']<5 or r['coverage_pct']>70 or abs(r['center_offset_pct'][0])>16 or abs(r['center_offset_pct'][1])>16]
     if bad: print('QA WARN:',len(bad),'composition outliers; see qa.tsv')
     return rows
@@ -90,11 +95,12 @@ def main():
     images={}
     for name,(bg,kind,defaults) in ICON_SPECS.items():
         im=render(name,bg,kind); im.save(res/f'{name}.png',optimize=True); images[name]=im
-    preview(images,outdir); qa(images,outdir)
+    preview(images,outdir); rows=qa(images,outdir)
     launch=render('skeuo_settings',ICON_SPECS['skeuo_settings'][0],'settings')
     for dens,size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
         d=ROOT/f'app/src/main/res/mipmap-{dens}'; d.mkdir(parents=True,exist_ok=True); launch.resize((size,size),Image.Resampling.LANCZOS).save(d/'ic_launcher.png')
-    print(f'Liquid27 v4: generated {len(images)} icons; previews + QA in {outdir}')
+    vector_count=sum(1 for r in rows if r['geometry_engine']=='svg2048')
+    print(f'Liquid27 v4: generated {len(images)} icons; {vector_count} true SVG reference glyphs; previews + QA in {outdir}')
 
 
 if __name__=='__main__':
