@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from liquid27.material import *
 from liquid27.glyphs import glyph
@@ -14,132 +14,67 @@ from liquid27.glyphs_v4_extra import glyph_v4_extra
 from liquid27.glyphs_vector import glyph_vector, VECTOR_KINDS
 from liquid27.glyphs_vector_tuned import glyph_vector_tuned
 from liquid27.glyphs_vector_home import glyph_vector_home, HOME_VECTOR_KINDS
-from liquid27.vector import rounded_rect_mask, stroked_path_mask
+from liquid27.glyphs_brand_curated import glyph_brand_curated, BRAND_CURATED_KINDS
+from liquid27.clear_material import (
+    clearify_layers as clearify_v41,
+    clear_background as clear_background_v41,
+    finish_clear_enclosure as finish_clear_v41,
+)
 from liquid27.catalog import ICON_SPECS
 
 ROOT = Path(__file__).resolve().parents[1]
 VARIANTS = ('color', 'clear')
-ALL_VECTOR_KINDS = set(VECTOR_KINDS) | set(HOME_VECTOR_KINDS) | {'gmail'}
+ALL_VECTOR_KINDS = set(VECTOR_KINDS) | set(HOME_VECTOR_KINDS) | set(BRAND_CURATED_KINDS)
 
-
-def gmail_layers():
-    """A Gmail-specific multicolor M, never the generic Mail/envelope glyph."""
-    body = rounded_rect_mask(190, 258, 644, 508, 108)
-    left = stroked_path_mask('M286 382 L286 690', width=64)
-    diag_l = stroked_path_mask('M286 382 L512 552', width=64)
-    diag_r = stroked_path_mask('M512 552 L738 382', width=64)
-    right = stroked_path_mask('M738 382 L738 690', width=64)
-    return [
-        layer(body, '#ffffff', .73, .070, 'inside', .016, 'glass', 'normal', (0, -1), 0, 2.0, 5.0),
-        layer(left, '#4285f4', .88, .072, 'outside', .008, 'glass', 'normal', (0, -2), 0, 1.5, 4.0),
-        layer(diag_l, '#ea4335', .90, .075, 'outside', .008, 'glass', 'normal', (0, -2), 0, 1.5, 4.0),
-        layer(diag_r, '#fbbc04', .88, .075, 'outside', .008, 'glass', 'normal', (0, -2), 0, 1.5, 4.0),
-        layer(right, '#34a853', .88, .072, 'outside', .008, 'glass', 'normal', (0, -2), 0, 1.5, 4.0),
-    ]
+# Deliberately foregrounds the icons the user called out as broken.  This preview
+# is a release gate, not decoration.
+GEOMETRY_FOCUS = [
+    'skeuo_gamehub', 'skeuo_github', 'skeuo_playstore', 'skeuo_kaspi',
+    'skeuo_pinterest', 'skeuo_telegram', 'skeuo_gmail', 'skeuo_discord',
+    'skeuo_facebook', 'skeuo_reddit', 'skeuo_tiktok', 'skeuo_whatsapp',
+    'skeuo_twitter', 'skeuo_steam', 'skeuo_snapchat', 'skeuo_instagram',
+]
 
 
 def base_layers(kind):
-    if kind == 'gmail':
-        return gmail_layers()
-    return (
-        glyph_vector_tuned(kind)
+    """Return shared geometry before Color/Clear material treatment.
+
+    Curated brand geometry is intentionally first.  A bad legacy fallback must
+    never override one of the reviewed SVG paths.
+    """
+    layers = (
+        glyph_brand_curated(kind)
+        or glyph_vector_tuned(kind)
         or glyph_vector_home(kind)
         or glyph_vector(kind)
         or glyph_v4(kind)
         or glyph_v4_extra(kind)
         or glyph(kind)
     )
+    if not layers:
+        raise RuntimeError(f'No glyph geometry for {kind}')
+    return layers
 
 
-def clearify_layers(layers):
-    """Convert shared geometry to a low-chroma, genuinely translucent glass preset."""
-    result = []
-    for src in layers:
-        item = dict(src)
-        source_luma = luminance(item.get('fill', '#ffffff'))
-        if item.get('material') == 'ink':
-            # Preserve hierarchy without opaque black/brand ink in the Clear pack.
-            item['material'] = 'glass'
-            item['fill'] = '#aab2bd' if source_luma < 150 else '#eef2f6'
-            item['opacity'] = .48 if source_luma < 150 else .52
-            item['refraction'] = .085
-            item['specular'] = 'inside'
-            item['shadow'] = .004
-            item['blend'] = 'normal'
-            item['blur'] = 0
-        else:
-            # Brand color is intentionally removed in Clear. Geometry remains identical.
-            item['fill'] = '#e9eef4' if source_luma >= 105 else '#c5cdd7'
-            item['opacity'] = .46 if source_luma >= 105 else .42
-            item['refraction'] = max(.095, float(item.get('refraction', .06)) * 1.35)
-            item['specular'] = 'outside'
-            item['shadow'] = min(.009, float(item.get('shadow', 0)))
-            item['blend'] = 'normal'
-            item['blur'] = min(1.0, float(item.get('blur', 0)))
-        item['shadow_offset'] = min(1.5, float(item.get('shadow_offset', 2.0)))
-        item['shadow_blur'] = min(4.0, float(item.get('shadow_blur', 5.0)))
-        result.append(item)
-    return result
-
-
-def layers_for(kind, variant='color'):
+def layers_for(kind, variant='color', key=None):
     layers = base_layers(kind)
-    return clearify_layers(layers) if variant == 'clear' else layers
-
-
-def clear_background():
-    """Partially transparent enclosure that lets the actual OxygenOS wallpaper show through."""
-    canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
-
-    # Neutral glass body. Deliberately not opaque: Android composites this over the wallpaper.
-    body = Image.new('RGBA', (WORK, WORK), (232, 237, 243, 0))
-    body.putalpha(ENCL.point(lambda v: int(v * .20)))
-    canvas.alpha_composite(body)
-
-    # Soft frost, strongest toward the top, still retaining real alpha transparency.
-    frost = ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK)))
-    frost = inter(frost.point(lambda v: int((v / 255.0) ** 2.0 * 28)), ENCL)
-    white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
-    white.putalpha(frost)
-    canvas.alpha_composite(white)
-
-    # Directional glass boundary rather than a decorative frame.
-    top = inter(top_facing_edge(ENCL, 4.0), ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK))))
-    top = top.point(lambda v: int(v * .55))
-    hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
-    hi.putalpha(top)
-    canvas.alpha_composite(hi)
-
-    low = inter(bottom_facing_edge(ENCL, 2.2), Image.linear_gradient('L').resize((WORK, WORK)))
-    low = low.point(lambda v: int(v * .12))
-    shade = Image.new('RGBA', (WORK, WORK), (74, 82, 94, 0))
-    shade.putalpha(low)
-    canvas.alpha_composite(shade)
-    return canvas
-
-
-def finish_clear_enclosure(canvas):
-    # Add one restrained interior specular sweep, while preserving partial alpha.
-    sheen = ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK)))
-    sheen = inter(sheen.point(lambda v: int((v / 255.0) ** 3.0 * 18)), ENCL)
-    white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
-    white.putalpha(sheen)
-    canvas.alpha_composite(white)
-    canvas.putalpha(inter(canvas.getchannel('A'), ENCL))
+    if variant == 'clear':
+        return clearify_v41(layers, key or kind)
+    return layers
 
 
 def render(name, bgspec, kind, variant='color'):
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
     if variant == 'clear':
-        canvas.alpha_composite(clear_background())
+        canvas.alpha_composite(clear_background_v41(name))
     else:
         canvas.alpha_composite(background(bgspec))
 
-    for lay in layers_for(kind, variant):
+    for lay in layers_for(kind, variant, name):
         composite_layer(canvas, **lay)
 
     if variant == 'clear':
-        finish_clear_enclosure(canvas)
+        finish_clear_v41(canvas, name)
     else:
         finish_enclosure(canvas)
         canvas.putalpha(ENCL)
@@ -154,102 +89,96 @@ def output_paths(variant):
     )
 
 
+def _sheet(images, outpath, bg, names, cols=5, icon_size=132):
+    font = ImageFont.truetype(FONT_REG, 18)
+    cell = 190
+    row_h = 205
+    rows = math.ceil(len(names) / cols)
+    can = Image.new('RGB', (cols * cell + 60, rows * row_h + 60), rgb(bg))
+    d = ImageDraw.Draw(can)
+    fg = (235, 235, 238) if luminance(bg) < 128 else (34, 34, 38)
+    for i, name in enumerate(names):
+        x = 30 + (i % cols) * cell
+        y = 30 + (i // cols) * row_h
+        ic = images[name].resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+        can.paste(ic, (x + (cell - icon_size) // 2, y), ic)
+        label = name[6:].replace('_', ' ')[:18]
+        b = d.textbbox((0, 0), label, font=font)
+        d.text((x + cell / 2 - (b[2] - b[0]) / 2, y + icon_size + 12), label, font=font, fill=fg)
+    can.save(outpath)
+
+
 def preview(images, outdir, variant):
     show = [
         'skeuo_phone', 'skeuo_messages', 'skeuo_camera', 'skeuo_photos', 'skeuo_settings',
-        'skeuo_mail', 'skeuo_gmail', 'skeuo_maps', 'skeuo_clock', 'skeuo_weather',
-        'skeuo_notes', 'skeuo_calendar', 'skeuo_appstore', 'skeuo_telegram', 'skeuo_discord',
-        'skeuo_youtube', 'skeuo_revanced', 'skeuo_chrome', 'skeuo_spotify', 'skeuo_instagram',
-        'skeuo_soundcloud', 'skeuo_kaspi', 'skeuo_2gis', 'skeuo_chatgpt', 'skeuo_gamehub',
+        'skeuo_gmail', 'skeuo_maps', 'skeuo_clock', 'skeuo_weather', 'skeuo_notes',
+        'skeuo_calendar', 'skeuo_playstore', 'skeuo_telegram', 'skeuo_discord', 'skeuo_youtube',
+        'skeuo_chrome', 'skeuo_spotify', 'skeuo_instagram', 'skeuo_chatgpt', 'skeuo_gamehub',
+        'skeuo_github', 'skeuo_kaspi', 'skeuo_pinterest', 'skeuo_steam', 'skeuo_whatsapp',
     ]
-    font = ImageFont.truetype(FONT_REG, 18)
-
-    def sheet(name, bg, names=show, cols=5, icon_size=132):
-        cell = 190
-        rows = math.ceil(len(names) / cols)
-        w = cols * cell + 60
-        h = rows * 210 + 60
-        can = Image.new('RGB', (w, h), rgb(bg))
-        d = ImageDraw.Draw(can)
-        fg = (235, 235, 238) if luminance(bg) < 128 else (34, 34, 38)
-        for i, n in enumerate(names):
-            x = 30 + (i % cols) * cell
-            y = 30 + (i // cols) * 210
-            ic = images[n].resize((icon_size, icon_size), Image.Resampling.LANCZOS)
-            can.paste(ic, (x + (cell - icon_size) // 2, y), ic)
-            label = n[6:].replace('_', ' ')[:16]
-            b = d.textbbox((0, 0), label, font=font)
-            d.text((x + cell / 2 - (b[2] - b[0]) / 2, y + 145), label, font=font, fill=fg)
-        can.save(outdir / name)
-
-    sheet('preview_light.png', '#eff0f3')
-    sheet('preview_dark.png', '#17181c')
+    _sheet(images, outdir / 'preview_light.png', '#eff0f3', show)
+    _sheet(images, outdir / 'preview_dark.png', '#17181c', show)
+    _sheet(images, outdir / 'preview_geometry_focus.png', '#252936', GEOMETRY_FOCUS, cols=4, icon_size=144)
 
     vector_names = [name for name, (_, kind, _) in ICON_SPECS.items() if kind in ALL_VECTOR_KINDS]
-    sheet('preview_vector_reference.png', '#17181c', vector_names, cols=4, icon_size=144)
+    _sheet(images, outdir / 'preview_vector_reference.png', '#17181c', vector_names, cols=4, icon_size=144)
 
     all_names = list(images.keys())
-    cols_all = 6
-    cell_all = 170
-    row_h = 190
-    rows_all = math.ceil(len(all_names) / cols_all)
-    full = Image.new('RGB', (cols_all * cell_all + 60, rows_all * row_h + 60), rgb('#17181c'))
-    fd = ImageDraw.Draw(full)
-    ff = ImageFont.truetype(FONT_REG, 16)
-    for i, n in enumerate(all_names):
-        x = 30 + (i % cols_all) * cell_all
-        y = 30 + (i // cols_all) * row_h
-        ic = images[n].resize((118, 118), Image.Resampling.LANCZOS)
-        full.paste(ic, (x + 26, y), ic)
-        label = n[6:].replace('_', ' ')[:17]
-        b = fd.textbbox((0, 0), label, font=ff)
-        fd.text((x + 85 - (b[2] - b[0]) / 2, y + 132), label, font=ff, fill=(238, 238, 242))
-    full.save(outdir / 'preview_full.png')
+    _sheet(images, outdir / 'preview_full.png', '#17181c', all_names, cols=6, icon_size=118)
 
-    # Color-rich field makes actual transparency in the Clear variant obvious.
-    w, h = 1080, 1280
-    wall = Image.new('RGB', (w, h), '#171326')
-    for col, xy, rad in [('#7f335f', (240, 280), 600), ('#233b8a', (850, 260), 650), ('#693b22', (800, 970), 650)]:
-        m = Image.radial_gradient('L').resize((rad, rad))
-        m = ImageOps.invert(m).point(lambda v: int(v * .65))
+    # Wallpaper preview is essential for Clear.  It exposes fake milky plates,
+    # over-strong reflections and loss of actual alpha immediately.
+    w, h = 1080, 1500
+    wall = Image.new('RGB', (w, h), '#6c596b')
+    for col, xy, rad in [('#d9a4a7', (230, 260), 720), ('#776f98', (850, 420), 760), ('#51455d', (780, 1180), 900)]:
+        m = ImageOps.invert(Image.radial_gradient('L').resize((rad, rad))).point(lambda v: int(v * .68))
         fm = Image.new('L', (w, h), 0)
         fm.paste(m, (xy[0] - rad // 2, xy[1] - rad // 2))
         wall = Image.composite(Image.new('RGB', (w, h), rgb(col)), wall, fm)
+    # Thin curved wallpaper-like rails make alpha/reflection behaviour easy to judge.
+    wd = ImageDraw.Draw(wall)
+    wd.arc((-300, -260, 850, 650), 8, 122, fill=(235, 224, 228), width=5)
+    wd.arc((-180, 260, 1320, 1120), 8, 126, fill=(224, 216, 224), width=4)
+    wd.arc((250, 750, 1500, 1800), 195, 315, fill=(224, 216, 224), width=4)
+
     d = ImageDraw.Draw(wall)
-    font2 = ImageFont.truetype(FONT_REG, 22)
-    for i, n in enumerate(show[:20]):
-        x = 75 + (i % 4) * 245
-        y = 110 + (i // 4) * 220
-        ic = images[n].resize((116, 116), Image.Resampling.LANCZOS)
+    font = ImageFont.truetype(FONT_REG, 22)
+    for i, name in enumerate(GEOMETRY_FOCUS[:16]):
+        x = 72 + (i % 4) * 250
+        y = 120 + (i // 4) * 270
+        ic = images[name].resize((126, 126), Image.Resampling.LANCZOS)
         wall.paste(ic, (x, y), ic)
-        label = n[6:].replace('_', ' ')[:12]
-        b = d.textbbox((0, 0), label, font=font2)
-        d.text((x + 58 - (b[2] - b[0]) / 2, y + 126), label, font=font2, fill=(245, 245, 248))
+        label = name[6:].replace('_', ' ')[:14]
+        b = d.textbbox((0, 0), label, font=font)
+        d.text((x + 63 - (b[2] - b[0]) / 2, y + 139), label, font=font, fill=(249, 247, 250))
     wall.save(outdir / 'preview_wallpaper.png')
 
-    hs_bg = (235, 236, 240) if variant == 'color' else (62, 68, 84)
-    hs = Image.new('RGB', (1080, 1920), hs_bg)
+    # Launcher-scale preview.  No enlarged 512px inspection is accepted as the
+    # only visual QA signal.
+    hs = Image.new('RGB', (1080, 1920), (235, 236, 240) if variant == 'color' else (102, 91, 107))
     d = ImageDraw.Draw(hs)
     f = ImageFont.truetype(FONT_REG, 24)
-    for i, n in enumerate(show[:20]):
-        x = 93 + (i % 4) * 245
-        y = 300 + (i // 4) * 240
-        ic = images[n].resize((122, 122), Image.Resampling.LANCZOS)
+    for i, name in enumerate(show[:20]):
+        x = 92 + (i % 4) * 245
+        y = 270 + (i // 4) * 245
+        ic = images[name].resize((122, 122), Image.Resampling.LANCZOS)
         hs.paste(ic, (x, y), ic)
-        label = n[6:].replace('_', ' ')[:12]
+        label = name[6:].replace('_', ' ')[:13]
         b = d.textbbox((0, 0), label, font=f)
-        label_color = (35, 35, 40) if variant == 'color' else (240, 242, 246)
-        d.text((x + 61 - (b[2] - b[0]) / 2, y + 135), label, font=f, fill=label_color)
+        lc = (35, 35, 40) if variant == 'color' else (246, 243, 248)
+        d.text((x + 61 - (b[2] - b[0]) / 2, y + 136), label, font=f, fill=lc)
     hs.save(outdir / 'preview_home.png')
 
 
 def qa(images, outdir, variant):
     rows = []
-    for name, (bg, kind, defaults) in ICON_SPECS.items():
-        layers = layers_for(kind, variant)
+    for name, (_, kind, _) in ICON_SPECS.items():
+        # Geometry metrics always use the canonical geometry, not Clear's
+        # variable-density optical mask.
+        geom_layers = base_layers(kind)
         fg = blank_mask()
-        for l in layers:
-            fg = union(fg, l['mask'])
+        for lay in geom_layers:
+            fg = union(fg, lay['mask'])
         bb = fg.getbbox()
         coverage = sum(fg.getdata()) / (255 * WORK * WORK)
         if bb:
@@ -258,15 +187,17 @@ def qa(images, outdir, variant):
             off = ((cx - WORK / 2) / WORK, (cy - WORK / 2) / WORK)
         else:
             off = (0, 0)
+
         im = images[name]
         small = im.convert('RGB').resize((64, 64))
         vals = [.2126 * r + .7152 * g + .0722 * b for r, g, b in small.getdata()]
         alpha = list(im.getchannel('A').resize((64, 64)).getdata())
+        engine = 'svg2048-curated' if kind in BRAND_CURATED_KINDS else ('svg2048' if kind in ALL_VECTOR_KINDS else 'legacy')
         rows.append({
             'icon': name,
             'kind': kind,
             'variant': variant,
-            'geometry_engine': 'svg2048' if kind in ALL_VECTOR_KINDS else 'legacy',
+            'geometry_engine': engine,
             'foreground_bbox': bb,
             'coverage_pct': round(coverage * 100, 1),
             'center_offset_pct': [round(off[0] * 100, 1), round(off[1] * 100, 1)],
@@ -274,6 +205,7 @@ def qa(images, outdir, variant):
             'contrast_estimate': round((max(vals) - min(vals)) / 255, 3),
             'mean_alpha': round(sum(alpha) / len(alpha), 1),
         })
+
     (outdir / 'qa.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
     with (outdir / 'qa.tsv').open('w', encoding='utf-8') as f:
         f.write('icon\tkind\tvariant\tgeometry_engine\tforeground_bbox\tcoverage_pct\tcenter_offset_pct\tmean_luminance\tcontrast_estimate\tmean_alpha\n')
@@ -290,7 +222,7 @@ def generate_variant(variant):
         p.unlink()
 
     images = {}
-    for name, (bg, kind, defaults) in ICON_SPECS.items():
+    for name, (bg, kind, _) in ICON_SPECS.items():
         im = render(name, bg, kind, variant)
         im.save(res / f'{name}.png', optimize=True)
         images[name] = im
@@ -304,9 +236,10 @@ def generate_variant(variant):
         d.mkdir(parents=True, exist_ok=True)
         launch.resize((size, size), Image.Resampling.LANCZOS).save(d / 'ic_launcher.png')
 
-    vector_count = sum(1 for r in rows if r['geometry_engine'] == 'svg2048')
+    curated = sum(1 for r in rows if r['geometry_engine'] == 'svg2048-curated')
+    vector = sum(1 for r in rows if r['geometry_engine'].startswith('svg2048'))
     mean_alpha = sum(r['mean_alpha'] for r in rows) / len(rows)
-    print(f'Liquid27 {variant}: generated {len(images)} icons; {vector_count} SVG2048 glyphs; mean alpha {mean_alpha:.1f}')
+    print(f'Liquid27 {variant}: {len(images)} icons; {curated} curated brands; {vector} vector glyphs; mean alpha {mean_alpha:.1f}')
 
 
 def main():
