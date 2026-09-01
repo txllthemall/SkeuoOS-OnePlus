@@ -11,14 +11,29 @@ android {
         versionCode 4
         versionName '4.0.0'
     }
+
+    flavorDimensions += 'appearance'
+    productFlavors {
+        color {
+            dimension 'appearance'
+            // Keep the original package id so the color build upgrades the existing pack.
+        }
+        clear {
+            dimension 'appearance'
+            // Separate package id so Color and Clear can be installed side by side.
+            applicationIdSuffix '.clear'
+            versionNameSuffix '-clear'
+        }
+    }
+
     buildTypes {
         release { minifyEnabled false }
     }
 }
 
-// v4 uses original vector-like geometry plus a layer-based static Liquid Glass renderer.
-// No Apple raster assets or v2 iOS 6 artwork are bundled or downloaded.
+// Both variants are generated from one vector/material codebase.  The Color flavor
+// keeps brand color while Clear bakes a low-chroma, partially transparent glass preset.
 tasks.register('generateLiquid27Icons', Exec) {
     workingDir rootProject.projectDir
-    commandLine 'python3', 'tools/generate_liquid27.py'
+    commandLine 'python3', 'tools/generate_liquid27.py', '--variant', 'all'
 }
