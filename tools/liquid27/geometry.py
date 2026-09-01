@@ -15,10 +15,6 @@ from .glyphs_vector_tuned import glyph_vector_tuned, TUNED_KINDS
 from .glyphs_vector_home import (
     glyph_vector_home,
     HOME_VECTOR_KINDS,
-    GOOGLE_PLAY_LEFT_D,
-    GOOGLE_PLAY_TOP_D,
-    GOOGLE_PLAY_BOTTOM_D,
-    GOOGLE_PLAY_D,
     SOUNDCLOUD_D,
     CLOUD_D,
     SUN_D,
@@ -26,6 +22,9 @@ from .glyphs_vector_home import (
 from .glyphs_brand_curated import (
     glyph_brand_curated,
     BRAND_CURATED_KINDS,
+    GOOGLE_PLAY_LEFT_D,
+    GOOGLE_PLAY_TOP_D,
+    GOOGLE_PLAY_BOTTOM_D,
     GOOGLE_PLAY_TIP_D,
 )
 from .glyphs_vector_complete import glyph_vector_complete, COMPLETE_VECTOR_KINDS
@@ -179,7 +178,6 @@ if _missing or _extra:
 
 
 def duplicate_production_kinds():
-    # Ownership construction above makes duplicates impossible; expose this for QA.
     seen = set()
     duplicates = set()
     for kinds in OWNER_SETS.values():
