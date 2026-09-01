@@ -26,7 +26,6 @@ def _rails(d: ImageDraw.ImageDraw, w: int, h: int, light=(240, 238, 240), dark=(
 
 
 def _color_test_wallpaper(w: int = 1080, h: int = 1640) -> Image.Image:
-    """Four-region wallpaper: purple, pink/red, blue and warm/orange."""
     wall = Image.new('RGB', (w, h), (92, 70, 104))
     d = ImageDraw.Draw(wall)
     half_w = w // 2
@@ -54,6 +53,8 @@ def _single_wallpaper(kind: str, w: int = 1080, h: int = 1640) -> Image.Image:
         'blue': ((29, 63, 120), (54, 112, 190), (21, 43, 82)),
         'dark': ((18, 18, 21), (42, 43, 49), (8, 9, 12)),
         'bright': ((232, 229, 224), (250, 247, 240), (207, 211, 218)),
+        'red': ((102, 32, 42), (198, 67, 78), (73, 24, 32)),
+        'cyan': ((24, 86, 96), (53, 151, 165), (16, 59, 69)),
     }
     base, accent, low = palettes[kind]
     wall = Image.new('RGB', (w, h), base)
@@ -63,6 +64,23 @@ def _single_wallpaper(kind: str, w: int = 1080, h: int = 1640) -> Image.Image:
     light = (246, 244, 242) if kind != 'bright' else (112, 112, 118)
     dark = (25, 24, 28) if kind != 'dark' else (180, 182, 188)
     _rails(d, w, h, light=light, dark=dark)
+    return wall
+
+
+def _stress_wallpaper(w: int = 1080, h: int = 1640) -> Image.Image:
+    """Diagnostic, not decorative: exposes edge bending and optical compression."""
+    wall = Image.new('RGB', (w, h), (126, 126, 126))
+    d = ImageDraw.Draw(wall)
+    d.rectangle((0, 0, w // 2, h // 2), fill=(20, 20, 22))
+    d.rectangle((w // 2, 0, w, h // 2), fill=(238, 238, 238))
+    d.rectangle((0, h // 2, w // 2, h), fill=(82, 82, 86))
+    d.rectangle((w // 2, h // 2, w, h), fill=(168, 168, 172))
+    for x in range(30, w, 70):
+        d.line((x, 0, x + 260, h), fill=(245, 245, 245) if (x // 70) % 2 == 0 else (18, 18, 18), width=3)
+    d.arc((-320, 190, 1280, 1120), 4, 174, fill=(255, 255, 255), width=7)
+    d.arc((-180, 610, 1420, 1540), 186, 352, fill=(12, 12, 12), width=7)
+    d.line((0, int(h * .60), w, int(h * .34)), fill=(255, 255, 255), width=5)
+    d.ellipse((760, 180, 814, 234), fill=(255, 255, 255))
     return wall
 
 
@@ -104,14 +122,21 @@ def main() -> None:
     OUTDIR.mkdir(parents=True, exist_ok=True)
     images = _images()
 
-    _render_grid(_color_test_wallpaper(), images, GEOMETRY_FOCUS).save(OUTDIR / 'preview_color_wallpaper.png')
+    focus = list(GEOMETRY_FOCUS)
+    # Put the two repaired outliers into the first row of diagnostics.
+    diagnostic_focus = ['skeuo_2gis', 'skeuo_revanced'] + [n for n in focus if n not in ('skeuo_2gis', 'skeuo_revanced')]
+
+    _render_grid(_color_test_wallpaper(), images, focus).save(OUTDIR / 'preview_color_wallpaper.png')
     _render_grid(_color_test_wallpaper(1080, 1920), images, HOME_SHOW, home=True).save(OUTDIR / 'preview_home_color.png')
-    _render_grid(_neutral_test_wallpaper(), images, GEOMETRY_FOCUS).save(OUTDIR / 'preview_neutral_wallpaper.png')
+    _render_grid(_neutral_test_wallpaper(), images, focus).save(OUTDIR / 'preview_neutral_wallpaper.png')
 
-    for kind in ('warm', 'blue', 'dark', 'bright'):
-        _render_grid(_single_wallpaper(kind), images, GEOMETRY_FOCUS).save(OUTDIR / f'preview_{kind}_wallpaper.png')
+    for kind in ('warm', 'blue', 'dark', 'bright', 'red', 'cyan'):
+        _render_grid(_single_wallpaper(kind), images, focus).save(OUTDIR / f'preview_{kind}_wallpaper.png')
 
-    print('Generated Clear validation previews: color, home color, neutral, warm, blue, dark, bright.')
+    _render_grid(_stress_wallpaper(), images, diagnostic_focus).save(OUTDIR / 'preview_refraction_stress.png')
+    _render_grid(_stress_wallpaper(), images, focus).save(OUTDIR / 'preview_highcontrast_wallpaper.png')
+
+    print('Generated Clear validation previews: color, home, neutral, warm, blue, dark, bright, red, cyan, stress.')
 
 
 if __name__ == '__main__':
