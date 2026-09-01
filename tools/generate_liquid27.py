@@ -52,32 +52,31 @@ def base_layers(kind):
 
 
 def clearify_layers(layers):
-    """Convert shared geometry to a low-chroma, genuinely translucent glass preset."""
+    """Same geometry, but true thin/thick clear-glass layers instead of a uniform gray tint."""
     result = []
-    for src in layers:
+    for index, src in enumerate(layers):
         item = dict(src)
         source_luma = luminance(item.get('fill', '#ffffff'))
+        depth = min(1.0, index / max(1, len(layers) - 1))
         if item.get('material') == 'ink':
-            # Preserve hierarchy without opaque black/brand ink in the Clear pack.
             item['material'] = 'glass'
-            item['fill'] = '#aab2bd' if source_luma < 150 else '#eef2f6'
-            item['opacity'] = .48 if source_luma < 150 else .52
-            item['refraction'] = .085
-            item['specular'] = 'inside'
-            item['shadow'] = .004
+            item['fill'] = '#b8c2cf' if source_luma < 150 else '#f2f5f8'
+            item['opacity'] = (.36 if source_luma < 150 else .44) + depth * .05
+            item['refraction'] = .125 + depth * .018
+            item['specular'] = 'inside' if index % 2 == 0 else 'outside'
+            item['shadow'] = .003
             item['blend'] = 'normal'
             item['blur'] = 0
         else:
-            # Brand color is intentionally removed in Clear. Geometry remains identical.
-            item['fill'] = '#e9eef4' if source_luma >= 105 else '#c5cdd7'
-            item['opacity'] = .46 if source_luma >= 105 else .42
-            item['refraction'] = max(.095, float(item.get('refraction', .06)) * 1.35)
-            item['specular'] = 'outside'
-            item['shadow'] = min(.009, float(item.get('shadow', 0)))
+            item['fill'] = '#edf3f8' if source_luma >= 105 else '#c8d2dd'
+            item['opacity'] = (.34 if source_luma >= 105 else .31) + depth * .055
+            item['refraction'] = max(.125, float(item.get('refraction', .06)) * 1.85) + depth * .012
+            item['specular'] = 'outside' if index % 3 else 'inside'
+            item['shadow'] = min(.006, float(item.get('shadow', 0)))
             item['blend'] = 'normal'
-            item['blur'] = min(1.0, float(item.get('blur', 0)))
-        item['shadow_offset'] = min(1.5, float(item.get('shadow_offset', 2.0)))
-        item['shadow_blur'] = min(4.0, float(item.get('shadow_blur', 5.0)))
+            item['blur'] = min(.65, float(item.get('blur', 0)))
+        item['shadow_offset'] = min(1.2, float(item.get('shadow_offset', 2.0)))
+        item['shadow_blur'] = min(3.2, float(item.get('shadow_blur', 5.0)))
         result.append(item)
     return result
 
@@ -87,51 +86,130 @@ def layers_for(kind, variant='color'):
     return clearify_layers(layers) if variant == 'clear' else layers
 
 
-def clear_background():
-    """Partially transparent enclosure that lets the actual OxygenOS wallpaper show through."""
+def _icon_phase(name):
+    # Stable per-icon variation so the whole pack does not look stamped from one reflection texture.
+    total = sum((i + 1) * ord(ch) for i, ch in enumerate(name))
+    return (total % 101) / 100.0
+
+
+def _broad_reflection(name):
+    phase = _icon_phase(name)
+    dx = int((phase - .5) * 180)
+    field = Image.new('L', (WORK, WORK), 0)
+    d = ImageDraw.Draw(field)
+    d.polygon([
+        (-220 + dx, 260),
+        (40 + dx, -120),
+        (1060 + dx, 430),
+        (790 + dx, 820),
+    ], fill=86)
+    d.polygon([
+        (350 - dx // 3, -80),
+        (520 - dx // 3, -80),
+        (1110 - dx // 3, 410),
+        (1110 - dx // 3, 555),
+    ], fill=58)
+    d.ellipse((560 + dx // 2, -180, 1120 + dx // 2, 370), fill=52)
+    field = field.filter(ImageFilter.GaussianBlur(64))
+    return inter(field, ENCL)
+
+
+def _soft_shadow_reflection(name):
+    phase = _icon_phase(name)
+    dx = int((phase - .5) * 120)
+    field = Image.new('L', (WORK, WORK), 0)
+    d = ImageDraw.Draw(field)
+    d.ellipse((430 + dx, 500, 1190 + dx, 1200), fill=38)
+    field = field.filter(ImageFilter.GaussianBlur(105))
+    return inter(field, ENCL)
+
+
+def clear_background(name):
+    """Highly transparent enclosure with locally varying thickness and reflected light."""
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
 
-    # Neutral glass body. Deliberately not opaque: Android composites this over the wallpaper.
-    body = Image.new('RGBA', (WORK, WORK), (232, 237, 243, 0))
-    body.putalpha(ENCL.point(lambda v: int(v * .20)))
+    # Thin central pane: wallpaper should dominate most of the icon.
+    body = Image.new('RGBA', (WORK, WORK), (226, 234, 243, 0))
+    body.putalpha(ENCL.point(lambda v: int(v * .105)))
     canvas.alpha_composite(body)
 
-    # Soft frost, strongest toward the top, still retaining real alpha transparency.
+    # Glass becomes visibly thicker near the boundary without becoming a chrome frame.
+    thick = inner_edge(ENCL, 42.0).filter(ImageFilter.GaussianBlur(12))
+    thick = thick.point(lambda v: int(v * .16))
+    thick_layer = Image.new('RGBA', (WORK, WORK), (236, 242, 248, 0))
+    thick_layer.putalpha(thick)
+    canvas.alpha_composite(thick_layer)
+
+    # Variable frost: upper area catches more light, lower center stays almost clear.
     frost = ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK)))
-    frost = inter(frost.point(lambda v: int((v / 255.0) ** 2.0 * 28)), ENCL)
+    frost = inter(frost.point(lambda v: int((v / 255.0) ** 2.25 * 19)), ENCL)
     white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     white.putalpha(frost)
     canvas.alpha_composite(white)
 
-    # Directional glass boundary rather than a decorative frame.
-    top = inter(top_facing_edge(ENCL, 4.0), ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK))))
-    top = top.point(lambda v: int(v * .55))
+    # Broad environment reflection. This is intentionally non-uniform and differs per icon.
+    reflect = _broad_reflection(name)
+    cool = Image.new('RGBA', (WORK, WORK), (238, 247, 255, 0))
+    cool.putalpha(reflect)
+    canvas.alpha_composite(cool)
+
+    # A darker reflected area is essential: real glass is not just white haze.
+    dark = _soft_shadow_reflection(name)
+    shade = Image.new('RGBA', (WORK, WORK), (63, 72, 87, 0))
+    shade.putalpha(dark)
+    canvas.alpha_composite(shade)
+
+    # Crisp top-facing boundary from the same vertical light direction as the material layers.
+    top = inter(top_facing_edge(ENCL, 5.0), ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK))))
+    top = top.point(lambda v: int(v * .78))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top)
     canvas.alpha_composite(hi)
 
-    low = inter(bottom_facing_edge(ENCL, 2.2), Image.linear_gradient('L').resize((WORK, WORK)))
-    low = low.point(lambda v: int(v * .12))
-    shade = Image.new('RGBA', (WORK, WORK), (74, 82, 94, 0))
-    shade.putalpha(low)
-    canvas.alpha_composite(shade)
+    low = inter(bottom_facing_edge(ENCL, 2.5), Image.linear_gradient('L').resize((WORK, WORK)))
+    low = low.point(lambda v: int(v * .13))
+    lower = Image.new('RGBA', (WORK, WORK), (55, 63, 76, 0))
+    lower.putalpha(low)
+    canvas.alpha_composite(lower)
     return canvas
 
 
-def finish_clear_enclosure(canvas):
-    # Add one restrained interior specular sweep, while preserving partial alpha.
-    sheen = ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK)))
-    sheen = inter(sheen.point(lambda v: int((v / 255.0) ** 3.0 * 18)), ENCL)
+def finish_clear_enclosure(canvas, name):
+    # Add two different reflection scales: a broad soft sweep plus a narrow crisp glint.
+    broad = _broad_reflection(name).point(lambda v: int(v * .34))
     white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
-    white.putalpha(sheen)
+    white.putalpha(broad)
     canvas.alpha_composite(white)
+
+    phase = _icon_phase(name)
+    dx = int((phase - .5) * 160)
+    glint = Image.new('L', (WORK, WORK), 0)
+    d = ImageDraw.Draw(glint)
+    d.polygon([
+        (-180 + dx, 140),
+        (-110 + dx, 35),
+        (900 + dx, 620),
+        (835 + dx, 720),
+    ], fill=92)
+    glint = inter(glint.filter(ImageFilter.GaussianBlur(18)), ENCL)
+    gl = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
+    gl.putalpha(glint)
+    canvas.alpha_composite(gl)
+
+    # Thin interior rim catches light strongly at the top and fades around the rest.
+    rim = inter(inner_edge(ENCL, 3.0), ImageOps.invert(Image.linear_gradient('L').resize((WORK, WORK))))
+    rim = rim.point(lambda v: int(v * .34))
+    rim_layer = Image.new('RGBA', (WORK, WORK), (247, 251, 255, 0))
+    rim_layer.putalpha(rim)
+    canvas.alpha_composite(rim_layer)
+
     canvas.putalpha(inter(canvas.getchannel('A'), ENCL))
 
 
 def render(name, bgspec, kind, variant='color'):
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
     if variant == 'clear':
-        canvas.alpha_composite(clear_background())
+        canvas.alpha_composite(clear_background(name))
     else:
         canvas.alpha_composite(background(bgspec))
 
@@ -139,7 +217,7 @@ def render(name, bgspec, kind, variant='color'):
         composite_layer(canvas, **lay)
 
     if variant == 'clear':
-        finish_clear_enclosure(canvas)
+        finish_clear_enclosure(canvas, name)
     else:
         finish_enclosure(canvas)
         canvas.putalpha(ENCL)
@@ -178,8 +256,8 @@ def preview(images, outdir, variant):
             ic = images[n].resize((icon_size, icon_size), Image.Resampling.LANCZOS)
             can.paste(ic, (x + (cell - icon_size) // 2, y), ic)
             label = n[6:].replace('_', ' ')[:16]
-            b = d.textbbox((0, 0), label, font=font)
-            d.text((x + cell / 2 - (b[2] - b[0]) / 2, y + 145), label, font=font, fill=fg)
+            b = d.textbbox((0,0), label, font=font)
+            d.text((x + cell / 2 - (b[2]-b[0]) / 2, y + 145), label, font=font, fill=fg)
         can.save(outdir / name)
 
     sheet('preview_light.png', '#eff0f3')
@@ -199,47 +277,46 @@ def preview(images, outdir, variant):
     for i, n in enumerate(all_names):
         x = 30 + (i % cols_all) * cell_all
         y = 30 + (i // cols_all) * row_h
-        ic = images[n].resize((118, 118), Image.Resampling.LANCZOS)
+        ic = images[n].resize((118,118), Image.Resampling.LANCZOS)
         full.paste(ic, (x + 26, y), ic)
         label = n[6:].replace('_', ' ')[:17]
-        b = fd.textbbox((0, 0), label, font=ff)
-        fd.text((x + 85 - (b[2] - b[0]) / 2, y + 132), label, font=ff, fill=(238, 238, 242))
+        b = fd.textbbox((0,0), label, font=ff)
+        fd.text((x + 85 - (b[2]-b[0]) / 2, y + 132), label, font=ff, fill=(238,238,242))
     full.save(outdir / 'preview_full.png')
 
-    # Color-rich field makes actual transparency in the Clear variant obvious.
     w, h = 1080, 1280
     wall = Image.new('RGB', (w, h), '#171326')
-    for col, xy, rad in [('#7f335f', (240, 280), 600), ('#233b8a', (850, 260), 650), ('#693b22', (800, 970), 650)]:
-        m = Image.radial_gradient('L').resize((rad, rad))
+    for col, xy, rad in [('#7f335f', (240,280), 600), ('#233b8a', (850,260), 650), ('#693b22', (800,970), 650)]:
+        m = Image.radial_gradient('L').resize((rad,rad))
         m = ImageOps.invert(m).point(lambda v: int(v * .65))
-        fm = Image.new('L', (w, h), 0)
-        fm.paste(m, (xy[0] - rad // 2, xy[1] - rad // 2))
-        wall = Image.composite(Image.new('RGB', (w, h), rgb(col)), wall, fm)
+        fm = Image.new('L', (w,h), 0)
+        fm.paste(m, (xy[0] - rad//2, xy[1] - rad//2))
+        wall = Image.composite(Image.new('RGB', (w,h), rgb(col)), wall, fm)
     d = ImageDraw.Draw(wall)
     font2 = ImageFont.truetype(FONT_REG, 22)
     for i, n in enumerate(show[:20]):
         x = 75 + (i % 4) * 245
         y = 110 + (i // 4) * 220
-        ic = images[n].resize((116, 116), Image.Resampling.LANCZOS)
-        wall.paste(ic, (x, y), ic)
+        ic = images[n].resize((116,116), Image.Resampling.LANCZOS)
+        wall.paste(ic, (x,y), ic)
         label = n[6:].replace('_', ' ')[:12]
-        b = d.textbbox((0, 0), label, font=font2)
-        d.text((x + 58 - (b[2] - b[0]) / 2, y + 126), label, font=font2, fill=(245, 245, 248))
+        b = d.textbbox((0,0), label, font=font2)
+        d.text((x + 58 - (b[2]-b[0]) / 2, y + 126), label, font=font2, fill=(245,245,248))
     wall.save(outdir / 'preview_wallpaper.png')
 
-    hs_bg = (235, 236, 240) if variant == 'color' else (62, 68, 84)
-    hs = Image.new('RGB', (1080, 1920), hs_bg)
+    hs_bg = (235,236,240) if variant == 'color' else (62,68,84)
+    hs = Image.new('RGB', (1080,1920), hs_bg)
     d = ImageDraw.Draw(hs)
     f = ImageFont.truetype(FONT_REG, 24)
     for i, n in enumerate(show[:20]):
         x = 93 + (i % 4) * 245
         y = 300 + (i // 4) * 240
-        ic = images[n].resize((122, 122), Image.Resampling.LANCZOS)
-        hs.paste(ic, (x, y), ic)
+        ic = images[n].resize((122,122), Image.Resampling.LANCZOS)
+        hs.paste(ic, (x,y), ic)
         label = n[6:].replace('_', ' ')[:12]
-        b = d.textbbox((0, 0), label, font=f)
-        label_color = (35, 35, 40) if variant == 'color' else (240, 242, 246)
-        d.text((x + 61 - (b[2] - b[0]) / 2, y + 135), label, font=f, fill=label_color)
+        b = d.textbbox((0,0), label, font=f)
+        label_color = (35,35,40) if variant == 'color' else (240,242,246)
+        d.text((x + 61 - (b[2]-b[0]) / 2, y + 135), label, font=f, fill=label_color)
     hs.save(outdir / 'preview_home.png')
 
 
@@ -253,15 +330,15 @@ def qa(images, outdir, variant):
         bb = fg.getbbox()
         coverage = sum(fg.getdata()) / (255 * WORK * WORK)
         if bb:
-            cx = (bb[0] + bb[2]) / 2
-            cy = (bb[1] + bb[3]) / 2
-            off = ((cx - WORK / 2) / WORK, (cy - WORK / 2) / WORK)
+            cx = (bb[0]+bb[2]) / 2
+            cy = (bb[1]+bb[3]) / 2
+            off = ((cx-WORK/2)/WORK, (cy-WORK/2)/WORK)
         else:
-            off = (0, 0)
+            off = (0,0)
         im = images[name]
-        small = im.convert('RGB').resize((64, 64))
-        vals = [.2126 * r + .7152 * g + .0722 * b for r, g, b in small.getdata()]
-        alpha = list(im.getchannel('A').resize((64, 64)).getdata())
+        small = im.convert('RGB').resize((64,64))
+        vals = [.2126*r + .7152*g + .0722*b for r,g,b in small.getdata()]
+        alpha = list(im.getchannel('A').resize((64,64)).getdata())
         rows.append({
             'icon': name,
             'kind': kind,
@@ -269,10 +346,10 @@ def qa(images, outdir, variant):
             'geometry_engine': 'svg2048' if kind in ALL_VECTOR_KINDS else 'legacy',
             'foreground_bbox': bb,
             'coverage_pct': round(coverage * 100, 1),
-            'center_offset_pct': [round(off[0] * 100, 1), round(off[1] * 100, 1)],
-            'mean_luminance': round(sum(vals) / len(vals), 1),
-            'contrast_estimate': round((max(vals) - min(vals)) / 255, 3),
-            'mean_alpha': round(sum(alpha) / len(alpha), 1),
+            'center_offset_pct': [round(off[0]*100, 1), round(off[1]*100, 1)],
+            'mean_luminance': round(sum(vals)/len(vals), 1),
+            'contrast_estimate': round((max(vals)-min(vals))/255, 3),
+            'mean_alpha': round(sum(alpha)/len(alpha), 1),
         })
     (outdir / 'qa.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
     with (outdir / 'qa.tsv').open('w', encoding='utf-8') as f:
@@ -299,10 +376,10 @@ def generate_variant(variant):
     rows = qa(images, outdir, variant)
 
     launch = render('skeuo_settings', ICON_SPECS['skeuo_settings'][0], 'settings', variant)
-    for dens, size in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
+    for dens, size in [('mdpi',48), ('hdpi',72), ('xhdpi',96), ('xxhdpi',144), ('xxxhdpi',192)]:
         d = ROOT / f'app/src/{variant}/res/mipmap-{dens}'
         d.mkdir(parents=True, exist_ok=True)
-        launch.resize((size, size), Image.Resampling.LANCZOS).save(d / 'ic_launcher.png')
+        launch.resize((size,size), Image.Resampling.LANCZOS).save(d / 'ic_launcher.png')
 
     vector_count = sum(1 for r in rows if r['geometry_engine'] == 'svg2048')
     mean_alpha = sum(r['mean_alpha'] for r in rows) / len(rows)
@@ -311,7 +388,7 @@ def generate_variant(variant):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--variant', choices=('color', 'clear', 'all'), default='all')
+    parser.add_argument('--variant', choices=('color','clear','all'), default='all')
     args = parser.parse_args()
     requested = VARIANTS if args.variant == 'all' else (args.variant,)
     for variant in requested:
