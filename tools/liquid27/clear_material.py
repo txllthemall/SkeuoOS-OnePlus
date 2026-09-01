@@ -80,11 +80,10 @@ def clear_reflection_mask(key: str) -> Image.Image:
 
     edge = inner_edge(ENCL, 3.0 if style == 1 else 4.2)
     edge = edge.filter(ImageFilter.GaussianBlur(1.5 if style == 1 else 2.1))
-    edge = inter(edge, field).point(lambda v: int(v * (.24 if style == 1 else .33)))
+    edge = inter(edge, field).point(lambda v: int(v * (.28 if style == 1 else .38)))
 
-    # Broad but extremely faint response across the curved surface. The expensive
-    # 42 px morphology is cached globally above; only directional weighting varies.
-    broad = inter(_broad_surface_band(), field).point(lambda v: int(v * (.030 if style == 1 else .045)))
+    # Broad but faint surface response gives continuity across the curved sheet.
+    broad = inter(_broad_surface_band(), field).point(lambda v: int(v * (.045 if style == 1 else .065)))
     return ImageChops.lighter(edge, broad)
 
 
@@ -100,11 +99,11 @@ def _soft_inner_band(mask: Image.Image, edge_px: int, blur_px: int) -> Image.Ima
 @lru_cache(maxsize=1)
 def _enclosure_density() -> Image.Image:
     """Optical density rises toward the curved boundary; the centre stays almost clear."""
-    density = Image.new('L', (WORK, WORK), 4)
-    wide = _soft_inner_band(ENCL, 15, 34).point(lambda v: int(v * .11))
-    mid = _soft_inner_band(ENCL, 6, 14).point(lambda v: int(v * .15))
-    tight = _soft_inner_band(ENCL, 2, 4).point(lambda v: int(v * .22))
-    top = inter(ENCL, _diagonal_light(True)).point(lambda v: int(v * .010))
+    density = Image.new('L', (WORK, WORK), 5)
+    wide = _soft_inner_band(ENCL, 15, 34).point(lambda v: int(v * .12))
+    mid = _soft_inner_band(ENCL, 6, 14).point(lambda v: int(v * .17))
+    tight = _soft_inner_band(ENCL, 2, 4).point(lambda v: int(v * .24))
+    top = inter(ENCL, _diagonal_light(True)).point(lambda v: int(v * .012))
     density = ImageChops.add(density, wide, scale=1.0, offset=0)
     density = ImageChops.add(density, mid, scale=1.0, offset=0)
     density = ImageChops.add(density, tight, scale=1.0, offset=0)
@@ -114,16 +113,16 @@ def _enclosure_density() -> Image.Image:
 
 def _glyph_density(source_mask: Image.Image) -> Image.Image:
     """Glyph body is denser than the enclosure but still transparent glass, not white ink."""
-    base = Image.new('L', (WORK, WORK), 166)
-    top = _top_weight(1.8).point(lambda v: int(v * .034))
-    edge = _soft_inner_band(source_mask, 6, 10).point(lambda v: int(v * .20))
+    base = Image.new('L', (WORK, WORK), 158)
+    top = _top_weight(1.8).point(lambda v: int(v * .038))
+    edge = _soft_inner_band(source_mask, 6, 10).point(lambda v: int(v * .22))
     field = ImageChops.add(base, top, scale=1.0, offset=0)
     field = ImageChops.add(field, edge, scale=1.0, offset=0)
     return inter(source_mask, field)
 
 
 def clearify_layers(layers, key: str):
-    """Convert shared glyph geometry into a neutral translucent optical material."""
+    """Convert shared glyph geometry into neutral beveled glass with dual bright/dark edge cues."""
     result = []
     top_weight = _top_weight(.66)
     bottom_weight = _bottom_weight(.82)
@@ -135,9 +134,11 @@ def clearify_layers(layers, key: str):
         source_luma = luminance(item.get('fill', '#ffffff'))
         item['mask'] = _glyph_density(source_mask)
         item['material'] = 'glass'
-        item['fill'] = '#dedede' if source_luma < 145 else '#f2f2f2'
-        item['opacity'] = .18 if source_luma < 145 else .22
-        item['refraction'] = max(.145, min(.195, float(item.get('refraction', .06)) * 1.82))
+        # Slightly darker neutral body survives bright wallpapers while upper
+        # speculars keep it luminous on dark ones. Equal channels prevent tint.
+        item['fill'] = '#c9c9c9' if source_luma < 145 else '#dddddd'
+        item['opacity'] = .18 if source_luma < 145 else .21
+        item['refraction'] = max(.150, min(.205, float(item.get('refraction', .06)) * 1.90))
         item['specular'] = 'off'
         item['shadow'] = .0003
         item['blend'] = 'normal'
@@ -146,20 +147,27 @@ def clearify_layers(layers, key: str):
         item['shadow_blur'] = 1.0
         result.append(item)
 
-        # Directional micro-facets following the real glyph silhouette.
-        catch = inter(inter(top_facing_edge(source_mask, 1.8), top_weight), side_weight)
-        catch = catch.point(lambda v: int(v * .42))
+        # Bright directional facet.
+        catch = inter(inter(top_facing_edge(source_mask, 2.0), top_weight), side_weight)
+        catch = catch.point(lambda v: int(v * .48))
         if catch.getbbox():
-            result.append(layer(catch, '#ffffff', .23, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
+            result.append(layer(catch, '#ffffff', .27, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
 
-        inner = inner_edge(source_mask, 2.4).filter(ImageFilter.GaussianBlur(.8))
-        inner = inter(inner, top_weight).point(lambda v: int(v * .20))
+        # Narrow neutral inner reflection.
+        inner = inner_edge(source_mask, 2.5).filter(ImageFilter.GaussianBlur(.8))
+        inner = inter(inner, top_weight).point(lambda v: int(v * .22))
         if inner.getbbox():
-            result.append(layer(inner, '#ffffff', .11, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
+            result.append(layer(inner, '#ffffff', .12, 0, 'off', 0, 'ink', 'screen', (0, 0), 0, 0, 0))
 
-        lower = inter(bottom_facing_edge(source_mask, 1.5), bottom_weight).point(lambda v: int(v * .26))
+        # Dark micro-contour remains visible on bright backgrounds but disappears
+        # naturally on dark ones, approximating local contrast adaptation in a static asset.
+        contour = inner_edge(source_mask, 1.25).point(lambda v: int(v * .18))
+        if contour.getbbox():
+            result.append(layer(contour, '#282828', .10, 0, 'off', 0, 'ink', 'multiply', (0, 0), 0, 0, 0))
+
+        lower = inter(bottom_facing_edge(source_mask, 1.6), bottom_weight).point(lambda v: int(v * .30))
         if lower.getbbox():
-            result.append(layer(lower, '#303030', .10, 0, 'off', 0, 'ink', 'multiply', (0, 0), 0, 0, 0))
+            result.append(layer(lower, '#262626', .13, 0, 'off', 0, 'ink', 'multiply', (0, 0), 0, 0, 0))
 
     return result
 
@@ -167,9 +175,7 @@ def clearify_layers(layers, key: str):
 def clear_background(key: str) -> Image.Image:
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
 
-    # Intrinsic material is strictly neutral. Environmental hue comes only from
-    # the wallpaper in preview/runtime composition, never from these RGB values.
-    neutral = Image.new('RGBA', (WORK, WORK), (230, 230, 230, 0))
+    neutral = Image.new('RGBA', (WORK, WORK), (228, 228, 228, 0))
     neutral.putalpha(_enclosure_density())
     canvas.alpha_composite(neutral)
 
@@ -178,23 +184,27 @@ def clear_background(key: str) -> Image.Image:
     white.putalpha(reflection)
     canvas.alpha_composite(white)
 
-    # Multi-component boundary: bright top/side, faint neutral outer hairline,
-    # and weak opposite edge. None is a full white outline.
     light_side = _horizontal_weight(bool(_seed(key, 613) & 1))
-    top_edge = inter(inter(top_facing_edge(ENCL, 3.0), _top_weight(.52)), light_side)
-    top_edge = top_edge.point(lambda v: int(v * .52))
+    top_edge = inter(inter(top_facing_edge(ENCL, 3.2), _top_weight(.52)), light_side)
+    top_edge = top_edge.point(lambda v: int(v * .58))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
 
-    inner_rim = inter(inner_edge(ENCL, 1.7), _diagonal_light(bool(_seed(key, 617) & 1)))
-    inner_rim = inner_rim.point(lambda v: int(v * .18))
+    inner_rim = inter(inner_edge(ENCL, 1.9), _diagonal_light(bool(_seed(key, 617) & 1)))
+    inner_rim = inner_rim.point(lambda v: int(v * .22))
     ir = Image.new('RGBA', (WORK, WORK), (250, 250, 250, 0))
     ir.putalpha(inner_rim)
     canvas.alpha_composite(ir)
 
-    low_edge = inter(bottom_facing_edge(ENCL, 2.0), _bottom_weight(1.25)).point(lambda v: int(v * .075))
-    shade = Image.new('RGBA', (WORK, WORK), (38, 38, 38, 0))
+    # A weak all-around dark boundary preserves definition on bright wallpaper.
+    boundary = inner_edge(ENCL, 1.2).point(lambda v: int(v * .045))
+    bd = Image.new('RGBA', (WORK, WORK), (32, 32, 32, 0))
+    bd.putalpha(boundary)
+    canvas.alpha_composite(bd)
+
+    low_edge = inter(bottom_facing_edge(ENCL, 2.2), _bottom_weight(1.20)).point(lambda v: int(v * .095))
+    shade = Image.new('RGBA', (WORK, WORK), (34, 34, 34, 0))
     shade.putalpha(low_edge)
     canvas.alpha_composite(shade)
     return canvas
@@ -202,13 +212,13 @@ def clear_background(key: str) -> Image.Image:
 
 def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
     left = bool(_seed(key, 719) & 1)
-    hair = inter(outer_edge(ENCL, .85), _diagonal_light(left)).point(lambda v: int(v * .22))
+    hair = inter(outer_edge(ENCL, .90), _diagonal_light(left)).point(lambda v: int(v * .25))
     rim = Image.new('RGBA', (WORK, WORK), (248, 248, 248, 0))
     rim.putalpha(hair)
     canvas.alpha_composite(rim)
 
-    opposite = inter(outer_edge(ENCL, .70), ImageOps.invert(_diagonal_light(left))).point(lambda v: int(v * .035))
-    dark = Image.new('RGBA', (WORK, WORK), (32, 32, 32, 0))
+    opposite = inter(outer_edge(ENCL, .80), ImageOps.invert(_diagonal_light(left))).point(lambda v: int(v * .050))
+    dark = Image.new('RGBA', (WORK, WORK), (28, 28, 28, 0))
     dark.putalpha(opposite)
     canvas.alpha_composite(dark)
     canvas.putalpha(inter(canvas.getchannel('A'), ENCL))
@@ -240,13 +250,10 @@ def _lens_displacement(size: int):
     xn = (xx - c) / max(c, 1.0)
     yn = (yy - c) / max(c, 1.0)
     q = np.clip((np.abs(xn) ** 4 + np.abs(yn) ** 4) ** .25, 0.0, 1.4)
-
-    # Sample slightly toward the centre through most of the lens (magnification),
-    # then bend strongly outward in the curved shell near the boundary.
     centre = np.clip(1.0 - q, 0.0, 1.0) ** 2.2
-    shell = np.clip((q - .58) / .42, 0.0, 1.0) ** 1.75
-    centre_pull = -2.2 * centre
-    shell_push = 8.6 * shell
+    shell = np.clip((q - .56) / .44, 0.0, 1.0) ** 1.65
+    centre_pull = -2.6 * centre
+    shell_push = 9.4 * shell
     strength = centre_pull + shell_push
     return xn * strength, yn * strength * .90
 
@@ -256,13 +263,13 @@ def _enclosure_displacement(size: int, strength: float = 1.0):
     return dx * strength, dy * strength
 
 
-def _mask_gradient_displacement(mask: Image.Image, size: int, strength: float = 4.8):
+def _mask_gradient_displacement(mask: Image.Image, size: int, strength: float = 5.2):
     m = mask.resize((size, size), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(max(1.0, size * .009)))
     a = np.asarray(m, dtype=np.float32) / 255.0
     gy, gx = np.gradient(a)
     mag = np.sqrt(gx * gx + gy * gy)
     denom = np.maximum(mag, 1e-4)
-    edge = np.clip(mag * size * .34, 0.0, 1.0)
+    edge = np.clip(mag * size * .36, 0.0, 1.0)
     return (gx / denom) * edge * strength, (gy / denom) * edge * strength, a
 
 
@@ -274,26 +281,34 @@ def _resized_mask(mask: Image.Image, size: int, blur: float = 0.0) -> Image.Imag
 
 
 def _apply_preview_surface_response(base: Image.Image) -> Image.Image:
-    """Environment-adaptive surface response: brighter on dark backgrounds, darker edge on bright ones."""
+    """Adaptive transmission and edge response, strictly scoped inside the lens."""
     size = base.size[0]
-    result = base.convert('RGB')
-    luma = float(np.asarray(result.convert('L'), dtype=np.float32).mean()) / 255.0
+    original = base.convert('RGB')
+    luma = float(np.asarray(original.convert('L'), dtype=np.float32).mean()) / 255.0
+    encl = _resized_mask(ENCL, size)
 
-    top = _resized_mask(inter(inner_edge(ENCL, 5.0), _diagonal_light(True)), size, .8)
-    top_gain = .15 + (1.0 - luma) * .13
+    # Compress extreme luminance only inside glass. Bright wallpaper is slightly
+    # attenuated; dark wallpaper receives a tiny transmission lift.
+    if luma > .72:
+        body = ImageEnhance.Brightness(original).enhance(.925)
+        body = ImageEnhance.Contrast(body).enhance(1.025)
+    elif luma < .24:
+        body = ImageEnhance.Brightness(original).enhance(1.045)
+        body = ImageEnhance.Contrast(body).enhance(1.025)
+    else:
+        body = ImageEnhance.Contrast(original).enhance(1.008)
+    result = Image.composite(body, original, encl)
+
+    top = _resized_mask(inter(inner_edge(ENCL, 6.0), _diagonal_light(True)), size, .8)
+    top_gain = .18 + (1.0 - luma) * .16
     top = top.point(lambda v: int(v * top_gain))
-    hi = Image.new('RGB', result.size, (255, 255, 255))
-    result = Image.composite(hi, result, top)
+    result = Image.composite(Image.new('RGB', result.size, (255, 255, 255)), result, top)
 
-    low = _resized_mask(inter(inner_edge(ENCL, 4.0), _bottom_weight(.82)), size, .8)
-    low_gain = .040 + luma * .065
+    low = _resized_mask(inter(inner_edge(ENCL, 5.0), _bottom_weight(.82)), size, .8)
+    low_gain = .055 + luma * .095
     low = low.point(lambda v: int(v * low_gain))
-    dk = Image.new('RGB', result.size, (28, 28, 28))
-    result = Image.composite(dk, result, low)
-
-    # Subtle contrast compression inside the lens feels optical rather than frosted.
-    contrast = .985 if luma > .66 else 1.015 if luma < .28 else 1.0
-    return ImageEnhance.Contrast(result).enhance(contrast)
+    result = Image.composite(Image.new('RGB', result.size, (24, 24, 24)), result, low)
+    return result
 
 
 def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | None = None) -> Image.Image:
@@ -305,7 +320,7 @@ def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | Non
     size = base.size[0]
     dx, dy = _enclosure_displacement(size)
     warped = _bilinear_warp(arr, dx, dy)
-    warped_img = Image.fromarray(warped, 'RGB').filter(ImageFilter.GaussianBlur(max(.45, size * .0042)))
+    warped_img = Image.fromarray(warped, 'RGB').filter(ImageFilter.GaussianBlur(max(.48, size * .0046)))
 
     encl = ENCL.resize(base.size, Image.Resampling.LANCZOS)
     result = Image.composite(warped_img, base, encl)
@@ -315,18 +330,27 @@ def preview_refract_patch(under: Image.Image, foreground_mask: Image.Image | Non
         dx2, dy2, alpha = _mask_gradient_displacement(foreground_mask, size)
         arr2 = np.asarray(result, dtype=np.float32)
         warped2 = _bilinear_warp(arr2, dx2, dy2)
-        mixed = (arr2 * .24 + warped2.astype(np.float32) * .76).astype(np.uint8)
-        fm = Image.fromarray(np.clip(alpha * 242, 0, 255).astype(np.uint8), 'L')
+        mixed = (arr2 * .20 + warped2.astype(np.float32) * .80).astype(np.uint8)
+        fm = Image.fromarray(np.clip(alpha * 244, 0, 255).astype(np.uint8), 'L')
         result = Image.composite(Image.fromarray(mixed, 'RGB'), result, fm)
 
-        # The glyph catches the environment on its upper-facing edge, but keeps
-        # the wallpaper visible through its body.
+        # Local glyph transmission adaptation. No hue is introduced: only neutral
+        # luminance support so a glass glyph survives both near-white and near-black.
         gm = foreground_mask.resize((size, size), Image.Resampling.LANCZOS)
-        gtop = _resized_mask(inter(top_facing_edge(foreground_mask, 2.0), _top_weight(.65)), size, .6)
-        gtop = gtop.point(lambda v: int(v * .18))
+        patch_luma = float(np.asarray(base.convert('L'), dtype=np.float32).mean()) / 255.0
+        if patch_luma > .70:
+            support = gm.filter(ImageFilter.GaussianBlur(max(.45, size * .0025))).point(lambda v: int(v * .115))
+            result = Image.composite(Image.new('RGB', result.size, (70, 70, 70)), result, support)
+        elif patch_luma < .24:
+            support = gm.filter(ImageFilter.GaussianBlur(max(.45, size * .0025))).point(lambda v: int(v * .045))
+            result = Image.composite(Image.new('RGB', result.size, (235, 235, 235)), result, support)
+
+        gtop = _resized_mask(inter(top_facing_edge(foreground_mask, 2.2), _top_weight(.65)), size, .6)
+        gtop = gtop.point(lambda v: int(v * (.24 if patch_luma < .45 else .18)))
         result = Image.composite(Image.new('RGB', result.size, (255, 255, 255)), result, gtop)
-        glow = gm.filter(ImageFilter.GaussianBlur(max(.6, size * .003))).point(lambda v: int(v * .018))
-        result = Image.composite(Image.new('RGB', result.size, (245, 245, 245)), result, glow)
+
+        glow = gm.filter(ImageFilter.GaussianBlur(max(.6, size * .003))).point(lambda v: int(v * .015))
+        result = Image.composite(Image.new('RGB', result.size, (242, 242, 242)), result, glow)
 
     return result
 
@@ -338,7 +362,7 @@ def _metric_base():
     yy, xx = np.indices(density.shape)
     centre = (np.abs(xx - WORK / 2) < WORK * .20) & (np.abs(yy - WORK / 2) < WORK * .20)
     edge_mask = np.asarray(inner_edge(ENCL, 8), dtype=np.uint8) > 0
-    top_spec = np.asarray(inter(top_facing_edge(ENCL, 3.0), _top_weight(.52)), dtype=np.uint8)
+    top_spec = np.asarray(inter(top_facing_edge(ENCL, 3.2), _top_weight(.52)), dtype=np.uint8)
     dx, dy = _enclosure_displacement(128)
     disp = np.sqrt(dx * dx + dy * dy)
     return {
