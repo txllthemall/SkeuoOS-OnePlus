@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, master, v4-liquid27 ]
+    branches: [ main, master, v4-liquid27, v4.1-clear-glass ]
   pull_request:
   workflow_dispatch:
 
@@ -23,8 +23,8 @@ jobs:
           gradle-version: '8.13'
       - name: Install icon tooling
         run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
-      - name: Generate Color and Clear Liquid27 resources
-        run: python3 tools/generate_liquid27.py --variant all
+      - name: Generate Color and enhanced Clear Liquid27 resources
+        run: python3 tools/generate_liquid27_v41.py --variant all
       - name: Liquid27 visual QA
         run: python3 tools/qa_liquid27.py --variant all
       - name: Verify both packs
@@ -34,7 +34,7 @@ jobs:
       - name: Upload APKs and previews
         uses: actions/upload-artifact@v4
         with:
-          name: SkeuoOS-Liquid27-v4.0.0-dual
+          name: SkeuoOS-Liquid27-v4.1.0-dual
           path: |
             app/build/outputs/apk/color/debug/app-color-debug.apk
             app/build/outputs/apk/clear/debug/app-clear-debug.apk
