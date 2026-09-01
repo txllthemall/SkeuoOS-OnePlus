@@ -45,10 +45,7 @@ def _bottom_weight(power: float = 1.0) -> Image.Image:
 
 
 def _edge_gate(key: str, salt: int = 0, *, broad=False) -> Image.Image:
-    """Select one irregular illuminated corner/edge region.
-
-    This gate is only a lighting selector. It never defines brand geometry.
-    """
+    """Select one irregular illuminated corner/edge region."""
     s = _seed(key, salt)
     side = -1 if s & 1 else 1
     reach = .70 if broad else .57
@@ -72,11 +69,7 @@ def _edge_gate(key: str, salt: int = 0, *, broad=False) -> Image.Image:
 
 
 def reflection_style(key: str) -> int:
-    """0 = none, 1/2 = corner catch, 3 = rare broader edge reflection.
-
-    More than half of icons intentionally have no environmental reflection.
-    This prevents a procedural pattern from becoming the visual language.
-    """
+    """0 = none, 1/2 = corner catch, 3 = rare broader edge reflection."""
     v = _seed(key, 401) % 20
     if v < 11:
         return 0
@@ -93,30 +86,34 @@ def clear_reflection_mask(key: str) -> Image.Image:
     if style == 0:
         return blank_mask()
 
-    # Reflection is derived from the physical enclosure edge, not an ellipse
-    # painted inside the icon. A broad inner band gives it optical thickness;
-    # the gate exposes only one short upper/corner section.
-    width = 48 if style in (1, 2) else 78
-    band = inner_edge(ENCL, width).filter(ImageFilter.GaussianBlur(5 if style != 3 else 8))
+    # Use a narrow morphological edge and spread it optically with blur. This is
+    # equivalent to a broad soft reflection band visually, but avoids enormous
+    # 97–157px MinFilter kernels on every icon.
+    edge_px = 8 if style in (1, 2) else 12
+    blur_px = 17 if style in (1, 2) else 25
+    band = inner_edge(ENCL, edge_px).filter(ImageFilter.GaussianBlur(blur_px))
     gate = _edge_gate(key, 413 + style, broad=(style == 3))
     top = _top_weight(.62 if style == 3 else .74)
     mask = inter(inter(band, gate), top)
-    # Keep environmental reflection subordinate to refraction and edge response.
-    strength = .30 if style in (1, 2) else .38
+    strength = .34 if style in (1, 2) else .43
     return mask.point(lambda v: int(v * strength))
 
 
 def clear_reflection_coverage_pct(key: str) -> float:
     m = clear_reflection_mask(key)
-    # Alpha-weighted coverage is more useful than bbox coverage for soft light.
     return 100.0 * sum(m.getdata()) / (255.0 * WORK * WORK)
+
+
+def _soft_inner_band(mask: Image.Image, edge_px: int, blur_px: int) -> Image.Image:
+    """Fast optical-thickness field from a narrow true edge + soft falloff."""
+    return inner_edge(mask, edge_px).filter(ImageFilter.GaussianBlur(blur_px))
 
 
 def _glyph_density(source_mask: Image.Image) -> Image.Image:
     """Optical density follows thickness: clearer center, denser near edges."""
     base = Image.new('L', (WORK, WORK), 198)
     top = _top_weight(2.1).point(lambda v: int(v * .035))
-    edge = inner_edge(source_mask, 26).filter(ImageFilter.GaussianBlur(8)).point(lambda v: int(v * .16))
+    edge = _soft_inner_band(source_mask, 6, 11).point(lambda v: int(v * .19))
     field = ImageChops.add(base, top, scale=1.0, offset=0)
     field = ImageChops.add(field, edge, scale=1.0, offset=0)
     return inter(source_mask, field)
@@ -125,9 +122,9 @@ def _glyph_density(source_mask: Image.Image) -> Image.Image:
 def clearify_layers(layers, key: str):
     """Convert shared Color geometry into the Clear optical material.
 
-    Foreground glyphs do not receive a mandatory environmental reflection.
-    Their glass cue comes from actual lower-layer refraction plus thin
-    shape-following edge specular. This is what prevents repeated white pills.
+    No foreground layer receives a mandatory environmental reflection. Glass is
+    described by transparency, lower-layer refraction and shape-following edge
+    response. This removes both old crescents and repeated top oval/pill marks.
     """
     result = []
     top_weight = _top_weight(.66)
@@ -141,7 +138,6 @@ def clearify_layers(layers, key: str):
         item['mask'] = _glyph_density(source_mask)
         item['material'] = 'glass'
         item['fill'] = '#cbd4df' if source_luma < 145 else '#f2f5f8'
-        # Glyph glass is deliberately denser than the enclosure.
         item['opacity'] = .29 if source_luma < 145 else .35
         item['refraction'] = max(.118, min(.158, float(item.get('refraction', .06)) * 1.55))
         item['specular'] = 'inside'
@@ -152,7 +148,7 @@ def clearify_layers(layers, key: str):
         item['shadow_blur'] = 1.2
         result.append(item)
 
-        # Only a thin directional catch on the actual glyph contour.
+        # Thin directional catch light on the glyph contour itself.
         glint = inter(inter(top_facing_edge(source_mask, 1.8), top_weight), gate)
         glint = glint.point(lambda v: int(v * .46))
         if glint.getbbox():
@@ -168,11 +164,12 @@ def clear_background(key: str) -> Image.Image:
     """Highly transparent enclosure with edge-dependent optical thickness."""
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
 
-    # Clear center, denser edge. No uniform grey plate.
+    # Clear center, denser edge. Narrow true edge bands are blurred outward to
+    # produce optical-thickness falloff without huge morphological kernels.
     density = Image.new('L', (WORK, WORK), 11)
     density = ImageChops.add(density, _top_weight(2.25).point(lambda v: int(v * .018)))
-    edge_wide = inner_edge(ENCL, 52).filter(ImageFilter.GaussianBlur(13)).point(lambda v: int(v * .070))
-    edge_tight = inner_edge(ENCL, 12).filter(ImageFilter.GaussianBlur(4)).point(lambda v: int(v * .055))
+    edge_wide = _soft_inner_band(ENCL, 8, 22).point(lambda v: int(v * .15))
+    edge_tight = _soft_inner_band(ENCL, 3, 5).point(lambda v: int(v * .11))
     density = _clip(ImageChops.add(density, edge_wide, scale=1.0, offset=0))
     density = _clip(ImageChops.add(density, edge_tight, scale=1.0, offset=0))
 
@@ -180,7 +177,6 @@ def clear_background(key: str) -> Image.Image:
     neutral.putalpha(density)
     canvas.alpha_composite(neutral)
 
-    # Environmental reflection is sparse and physically attached to the edge.
     reflection = clear_reflection_mask(key)
     if reflection.getbbox():
         white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
@@ -194,7 +190,6 @@ def clear_background(key: str) -> Image.Image:
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
 
-    # Opposite/lower boundary response is intentionally very weak.
     low_edge = inter(bottom_facing_edge(ENCL, 1.35), _bottom_weight(1.3)).point(lambda v: int(v * .024))
     shade = Image.new('RGBA', (WORK, WORK), (48, 55, 68, 0))
     shade.putalpha(low_edge)
