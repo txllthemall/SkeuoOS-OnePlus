@@ -45,73 +45,86 @@ def _bottom_weight(power: float = 1.0) -> Image.Image:
 
 
 def _soft_patch(key: str, salt: int = 0, *, strength=255) -> Image.Image:
-    """Small environmental reflection, never a ribbon across the whole icon."""
+    """Short crisp environmental catch-light, never a ribbon across the icon."""
     s = _seed(key, salt)
     side = -1 if s & 1 else 1
-    cx = WORK * (0.70 if side > 0 else 0.30)
-    cy = WORK * (0.20 + ((s >> 7) & 31) / 31.0 * .10)
-    rx = WORK * (0.19 + ((s >> 13) & 15) / 15.0 * .035)
-    ry = WORK * (0.040 + ((s >> 18) & 7) / 7.0 * .018)
-    angle = side * (12 + ((s >> 22) & 7))
+    cx = WORK * (0.72 if side > 0 else 0.28)
+    cy = WORK * (0.145 + ((s >> 7) & 31) / 31.0 * .075)
+    rx = WORK * (0.115 + ((s >> 13) & 15) / 15.0 * .040)
+    ry = WORK * (0.020 + ((s >> 18) & 7) / 7.0 * .010)
+    angle = side * (8 + ((s >> 22) & 15) / 15.0 * 11)
     m = blank_mask()
     ImageDraw.Draw(m).ellipse((int(cx-rx), int(cy-ry), int(cx+rx), int(cy+ry)), fill=strength)
     m = m.rotate(angle, center=(WORK // 2, WORK // 2), resample=Image.Resampling.BICUBIC)
-    m = m.filter(ImageFilter.GaussianBlur(14))
+    m = m.filter(ImageFilter.GaussianBlur(7))
     return _clip(m)
+
+
+def _edge_gate(key: str, salt: int = 0) -> Image.Image:
+    """Select only one top/side section of a rim so no complete white outline appears."""
+    s = _seed(key, salt)
+    side = -1 if s & 1 else 1
+    m = blank_mask()
+    d = ImageDraw.Draw(m)
+    if side < 0:
+        d.polygon([(0, 0), (int(WORK*.68), 0), (int(WORK*.46), int(WORK*.48)), (0, int(WORK*.66))], fill=255)
+    else:
+        d.polygon([(int(WORK*.32), 0), (WORK, 0), (WORK, int(WORK*.66)), (int(WORK*.54), int(WORK*.48))], fill=255)
+    return _clip(m.filter(ImageFilter.GaussianBlur(18)))
 
 
 @lru_cache(maxsize=256)
 def _density_field(key: str) -> Image.Image:
-    """Subtle optical-density variation. No high-contrast painted reflections."""
-    field = Image.new('L', (WORK, WORK), 172)
-    top = _top_weight(1.8).point(lambda v: int(v * .055))
+    """Mild non-uniform optical density; the silhouette itself stays intact."""
+    field = Image.new('L', (WORK, WORK), 184)
+    top = _top_weight(1.9).point(lambda v: int(v * .050))
     field = ImageChops.add(field, top, scale=1.0, offset=0)
-    patch = _soft_patch(key, 17, strength=120).point(lambda v: int(v * .16))
+    patch = _soft_patch(key, 17, strength=120).point(lambda v: int(v * .105))
     field = ImageChops.add(field, patch, scale=1.0, offset=0)
     return _clip(field)
 
 
 def clearify_layers(layers, key: str):
-    """Clear variant: clean glyph geometry, low tint, sparse edge/specular response."""
+    """Clear variant: transparent glyph glass with crisp, sparse, directional highlights."""
     result = []
     field = _density_field(key)
-    reflection_field = _soft_patch(key, 61, strength=150)
-    top_weight = _top_weight(.72)
+    reflection_field = _soft_patch(key, 61, strength=190)
+    top_weight = _top_weight(.68)
+    gate = _edge_gate(key, 91)
 
     for src in layers:
         item = dict(src)
         source_mask = item['mask']
         source_luma = luminance(item.get('fill', '#ffffff'))
 
-        # Keep the complete silhouette readable. Density variation is mild and
-        # must never chew holes into brand geometry.
         item['mask'] = inter(source_mask, field)
         item['material'] = 'glass'
-        item['fill'] = '#cbd4df' if source_luma < 145 else '#f1f5f9'
-        item['opacity'] = .25 if source_luma < 145 else .30
-        item['refraction'] = max(.105, min(.145, float(item.get('refraction', .06)) * 1.42))
+        item['fill'] = '#cbd4df' if source_luma < 145 else '#f3f6fa'
+        item['opacity'] = .27 if source_luma < 145 else .32
+        item['refraction'] = max(.110, min(.150, float(item.get('refraction', .06)) * 1.48))
         item['specular'] = 'inside'
         item['shadow'] = .001
         item['blend'] = 'normal'
-        item['blur'] = min(.30, float(item.get('blur', 0)))
-        item['shadow_offset'] = .5
-        item['shadow_blur'] = 1.8
+        item['blur'] = min(.26, float(item.get('blur', 0)))
+        item['shadow_offset'] = .4
+        item['shadow_blur'] = 1.5
         result.append(item)
 
-        # Tiny local reflection only. Previous v4.1 used giant white crescents
-        # that read as shrink-wrap/cellophane and obscured the glyph.
-        reflection = inter(source_mask, reflection_field).point(lambda v: int(v * .24))
+        # One compact reflection. It is bright enough to read at launcher size,
+        # but occupies only a small part of the glyph and never crosses it.
+        reflection = inter(source_mask, reflection_field).point(lambda v: int(v * .36))
         if reflection.getbbox():
             result.append(layer(
-                reflection, '#ffffff', .10, 0, 'off', 0,
+                reflection, '#ffffff', .15, 0, 'off', 0,
                 'ink', 'screen', (0, 0), 0, 0, 0,
             ))
 
-        # Incomplete top-facing edge highlight. No full white outline.
-        glint = inter(top_facing_edge(source_mask, 1.8), top_weight).point(lambda v: int(v * .34))
+        # Broken top-facing edge highlight. This supplies the sharp glass cue
+        # that was missing in the previous almost-flat Clear preview.
+        glint = inter(inter(top_facing_edge(source_mask, 2.0), top_weight), gate).point(lambda v: int(v * .50))
         if glint.getbbox():
             result.append(layer(
-                glint, '#ffffff', .18, 0, 'off', 0,
+                glint, '#ffffff', .24, 0, 'off', 0,
                 'ink', 'screen', (0, 0), 0, 0, 0,
             ))
 
@@ -119,42 +132,50 @@ def clearify_layers(layers, key: str):
 
 
 def clear_background(key: str) -> Image.Image:
-    """Transparent enclosure whose wallpaper remains visually dominant."""
+    """Highly transparent enclosure with local optical density and sharp edge catches."""
     canvas = Image.new('RGBA', (WORK, WORK), (0, 0, 0, 0))
 
-    # Around 8-13% neutral body with a little more density at the upper edge.
-    density = Image.new('L', (WORK, WORK), 20)
-    density = ImageChops.add(density, _top_weight(2.0).point(lambda v: int(v * .030)))
-    edge = inner_edge(ENCL, 24).filter(ImageFilter.GaussianBlur(9)).point(lambda v: int(v * .065))
+    # Wallpaper remains dominant. The enclosure body itself is only a faint
+    # neutral density shift; depth comes from edges and local reflections.
+    density = Image.new('L', (WORK, WORK), 16)
+    density = ImageChops.add(density, _top_weight(2.1).point(lambda v: int(v * .024)))
+    edge = inner_edge(ENCL, 24).filter(ImageFilter.GaussianBlur(9)).point(lambda v: int(v * .045))
     density = _clip(ImageChops.add(density, edge, scale=1.0, offset=0))
 
     neutral = Image.new('RGBA', (WORK, WORK), (228, 233, 240, 0))
     neutral.putalpha(density)
     canvas.alpha_composite(neutral)
 
-    # One weak environmental reflection near the top/side. Most of the surface
-    # intentionally contains no reflection at all.
-    patch = _soft_patch(key, 1, strength=145).point(lambda v: int(v * .22))
+    # A single short upper reflection, varied per icon. It is intentionally
+    # stronger than v4.1-preview-1 but far smaller than the old white crescents.
+    patch = _soft_patch(key, 1, strength=210).point(lambda v: int(v * .34))
     white = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     white.putalpha(patch)
     canvas.alpha_composite(white)
 
-    top_edge = inter(top_facing_edge(ENCL, 3.2), _top_weight(.70)).point(lambda v: int(v * .36))
+    gate = _edge_gate(key, 7)
+    top_edge = inter(inter(top_facing_edge(ENCL, 3.0), _top_weight(.66)), gate).point(lambda v: int(v * .52))
     hi = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     hi.putalpha(top_edge)
     canvas.alpha_composite(hi)
 
-    low_edge = inter(bottom_facing_edge(ENCL, 1.6), _bottom_weight(1.2)).point(lambda v: int(v * .035))
-    shade = Image.new('RGBA', (WORK, WORK), (64, 70, 82, 0))
+    # Small side/rim response extends the bright edge around one corner only.
+    side_edge = inter(inner_edge(ENCL, 2.0), gate).point(lambda v: int(v * .16))
+    side = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
+    side.putalpha(side_edge)
+    canvas.alpha_composite(side)
+
+    low_edge = inter(bottom_facing_edge(ENCL, 1.5), _bottom_weight(1.25)).point(lambda v: int(v * .030))
+    shade = Image.new('RGBA', (WORK, WORK), (54, 61, 74, 0))
     shade.putalpha(low_edge)
     canvas.alpha_composite(shade)
     return canvas
 
 
 def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
-    # Only a hairline catch-light remains at the enclosure boundary. There is no
-    # second broad lobe, so the icon no longer looks wrapped in wet plastic.
-    hair = inter(outer_edge(ENCL, 1.05), _top_weight(.72)).point(lambda v: int(v * .18))
+    # Final hairline only on a selected illuminated section, never a full frame.
+    gate = _edge_gate(key, 23)
+    hair = inter(inter(outer_edge(ENCL, 1.05), _top_weight(.68)), gate).point(lambda v: int(v * .28))
     rim = Image.new('RGBA', (WORK, WORK), (255, 255, 255, 0))
     rim.putalpha(hair)
     canvas.alpha_composite(rim)
