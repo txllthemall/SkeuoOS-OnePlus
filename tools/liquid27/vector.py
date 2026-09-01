@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from io import BytesIO
 from typing import Iterable
 
@@ -10,16 +11,16 @@ from .material import WORK
 
 # Geometry is authored as real SVG paths in the Apple 1024-unit design space.
 # Cairo rasterizes every path at 2048 px before it is downsampled into the
-# material renderer.  We never rotate or scale a previously-rasterized glyph.
+# material renderer. We never rotate or scale a previously-rasterized glyph.
 VECTOR_RASTER = 2048
 DESIGN = 1024.0
 
 
-def _render(fragment: str, *, viewbox=(0.0, 0.0, DESIGN, DESIGN), target=None) -> Image.Image:
-    vx, vy, vw, vh = [float(x) for x in viewbox]
-    if target is None:
-        target = (0.0, 0.0, DESIGN, DESIGN)
-    x0, y0, x1, y1 = [float(x) for x in target]
+@lru_cache(maxsize=256)
+def _render_cached(fragment: str, viewbox: tuple[float, float, float, float],
+                   target: tuple[float, float, float, float]) -> Image.Image:
+    vx, vy, vw, vh = viewbox
+    x0, y0, x1, y1 = target
     tw, th = x1 - x0, y1 - y0
     scale = min(tw / vw, th / vh)
     ox = x0 + (tw - vw * scale) / 2.0 - vx * scale
@@ -39,6 +40,16 @@ def _render(fragment: str, *, viewbox=(0.0, 0.0, DESIGN, DESIGN), target=None) -
     if alpha.size != (WORK, WORK):
         alpha = alpha.resize((WORK, WORK), Image.Resampling.LANCZOS)
     return alpha
+
+
+def _render(fragment: str, *, viewbox=(0.0, 0.0, DESIGN, DESIGN), target=None) -> Image.Image:
+    vb = tuple(float(x) for x in viewbox)
+    if target is None:
+        target = (0.0, 0.0, DESIGN, DESIGN)
+    tgt = tuple(float(x) for x in target)
+    # Return a copy so callers can safely use normal Pillow operations without
+    # ever mutating the cached canonical mask.
+    return _render_cached(fragment, vb, tgt).copy()
 
 
 def path_mask(d: str, *, viewbox=(0, 0, 24, 24), target=(190, 190, 834, 834),
