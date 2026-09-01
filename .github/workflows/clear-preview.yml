@@ -27,7 +27,7 @@ jobs:
         run: |
           python3 tools/generate_liquid27.py --variant clear --quick
           cp build/liquid27-v4/clear/preview_clear_light.png build/liquid27-v4/clear/preview_clear_flat.png
-      - name: Render Clear optical validation set
+      - name: Render Clear optical and Android validation set
         run: python3 tools/generate_clear_validation_previews.py
       - name: Check Clear neutral color bias
         run: python3 tools/qa_clear_neutral.py
@@ -53,5 +53,18 @@ jobs:
             build/liquid27-v4/clear/preview_container_only.png
             build/liquid27-v4/clear/preview_glyph_glass_only.png
             build/liquid27-v4/clear/preview_material_ab.png
+            build/liquid27-v4/clear/preview_android_reality_check.png
+            build/liquid27-v4/clear/preview_android_material_ab.png
+            build/liquid27-v4/clear/preview_android_launcher_scale.png
+            build/liquid27-v4/clear/preview_android_container_only.png
+            build/liquid27-v4/clear/preview_android_glyph_only.png
+            build/liquid27-v4/clear/preview_android_static_warm.png
+            build/liquid27-v4/clear/preview_android_static_blue.png
+            build/liquid27-v4/clear/preview_android_static_dark.png
+            build/liquid27-v4/clear/preview_android_static_bright.png
+            build/liquid27-v4/clear/preview_android_static_highcontrast.png
+            build/liquid27-v4/clear/preview_optical_flow.png
+            build/liquid27-v4/clear/preview_surface_normals.png
+            build/liquid27-v4/clear/preview_fresnel_field.png
             build/liquid27-v4/clear/qa.tsv
           if-no-files-found: error
