@@ -15,101 +15,99 @@ Reviewed on 2026-08-31:
 - WWDC26 Design guide: https://developer.apple.com/wwdc26/guides/design/
 - SF Symbols guidance for simple, legible symbol geometry: https://developer.apple.com/sf-symbols/
 
-## Design invariants taken from Apple guidance
+## Design invariants
 
-1. **Layer-first construction.** A background plus one or more meaningful foreground layers is the primary model. Layers are ordered back-to-front; material properties belong to layers/groups rather than being painted onto a flattened bitmap.
-2. **Simple, bold, overlapping shapes.** Launcher-scale readability is a first-class target. Excessive complexity is avoided because overlap/refraction becomes noisy at small sizes.
-3. **No decorative outer shell.** Apple applies the enclosure and platform crop. Android needs a flattened crop, but v4 does not add a metallic ring, bevel, pseudo-chrome shell, or large common drop shadow.
-4. **Sharper iOS 27 material.** Apple's 2026 Icon Composer guidance describes a sharper rendering, crisp specular highlights and a vertical light angle from above. The WWDC26 group lab also recommends reviewing/reducing translucency for legibility when bringing iOS 26 icons forward.
-5. **Directional specular.** The renderer supports `automatic`, `inside`, `outside`, and `off`. Highlights are generated from directional mask edges, not a uniform white outline.
-6. **Real under-layer sampling.** Static refraction samples pixels already composited beneath a layer. A stronger edge band creates lens-like bending near material boundaries. This is not a generic white overlay or blur.
-7. **Restrained translucency.** The material tint remains saturated while enough of the actual lower layer is transmitted for the glass to read as material instead of a pastel sticker.
-8. **Restrained shadows.** Shadows only separate z-layers. There is no floating-button shadow treatment on the enclosure.
-9. **Optical consistency.** QA measures foreground bounds, occupied area, center offset, luminance and contrast and produces full, neutral, wallpaper and OnePlus-scale previews.
-10. **Continuous vector source geometry.** The reference glyph set is authored as SVG paths/primitives. Cairo rasterizes those paths at 2048 px, then the mask is downsampled into the material renderer and finally baked to 512×512 with Lanczos. No reference glyph is created by rotating a bitmap mask, joining Pillow polygons, or sampling a Bézier into a thick polyline.
+1. **Layer-first construction.** Background and meaningful foreground layers remain independent until the final static bake.
+2. **Simple, bold, optically balanced shapes.** Home Screen readability matters more than detail visible only at 512 px.
+3. **No decorative outer shell.** No metallic ring, bevel, pseudo-chrome frame, or common floating-button shadow.
+4. **Sharper material response.** Specular response is directional from above and edge-aware rather than a uniform white stroke.
+5. **Per-layer material.** Refraction, opacity, shadow and specular are properties of each material layer, not a global overlay.
+6. **Real under-layer sampling.** Color mode samples already-composited pixels below a glass layer for the static refraction approximation.
+7. **Restrained shadows.** Shadows exist only to separate z-layers.
+8. **Continuous vector source geometry.** Reference glyphs are SVG paths/primitives rasterized by Cairo at 2048 px, then downsampled into the 1024 material renderer and finally baked to 512×512 with Lanczos.
+9. **One geometry system, two appearance presets.** Color and Clear share component mappings and glyph geometry. Only material/background treatment changes.
 
-## SVG2048 reference geometry
+## Two installable APKs
 
-The geometry gate currently covers 12 reference icons:
+### SkeuoOS Liquid27
 
-- Phone
-- Messages
-- Camera
-- Photos
-- Settings
-- Mail
-- Telegram
-- Discord
-- YouTube
-- Spotify
-- Instagram
-- ChatGPT
+- product flavor: `color`
+- package id: `io.github.txllthemall.skeuoos`
+- keeps the existing package id so it upgrades the previous normal pack
+- colored backgrounds and brand-aware glass layers
+- higher opacity for maximum daily readability
 
-`tools/liquid27/vector.py` is the vector rasterization boundary and `tools/liquid27/glyphs_vector.py` contains the reference geometry. `tools/generate_liquid27.py` always prefers this path for the reference set. `tools/qa_liquid27.py` fails CI if fewer than 12 generated icons report the `svg2048` geometry engine.
+### SkeuoOS Liquid27 Clear
 
-The remaining catalog is still transitional and may use the older v4 semantic geometry until it is migrated. It is intentionally not described as finished.
+- product flavor: `clear`
+- package id: `io.github.txllthemall.skeuoos.clear`
+- can be installed next to the Color build
+- same glyph masks and Android component mappings as Color
+- brand color is intentionally removed from the material pass
+- enclosure and glyphs retain partial PNG alpha so the actual OxygenOS wallpaper remains visible through the icon
+- stronger neutral glass/specular treatment and much lower enclosure opacity
+
+The Clear APK can transmit the real wallpaper through alpha, but a static PNG cannot *refract* wallpaper pixels it does not know at build time. The clear renderer therefore does not fake wallpaper-dependent distortion with a painted gradient.
+
+## Gmail is Gmail, not generic Mail
+
+`skeuo_gmail` is permanently mapped to the dedicated `gmail` geometry kind. It does not reuse `mail`.
+
+The Color build uses an original multicolor glass **M** construction with separate blue, red, yellow and green vector strokes over a glass card. The Clear build uses the exact same M geometry, converted by the shared Clear material preset to neutral translucent glass. CI explicitly checks that Gmail is mapped to `gmail` and that its composition is not identical to generic Mail.
+
+## SVG2048 geometry
+
+`tools/liquid27/vector.py` is the vector rasterization boundary. Geometry is assembled in:
+
+- `glyphs_vector.py` — first reference set
+- `glyphs_vector_tuned.py` — optical tuning overrides
+- `glyphs_vector_home.py` — expanded Home Screen set
+
+The generator preference order is SVG tuning → expanded SVG geometry → base SVG geometry → transitional older v4 geometry. The long-term goal is to eliminate the transitional path entirely.
+
+Current SVG/Home Screen coverage includes the core reference set plus Gmail, Maps, Google Maps, Clock, Weather, Notes, Calendar, Google Calendar, App Store, ReVanced, Chrome, Recorder, SoundCloud, Kaspi, 2GIS, GameHub, Play Store and Google Photos.
 
 ## Geometry-source licensing
 
 No Apple icon artwork is shipped.
 
-For a small number of generic/system semantic silhouettes, the vector base comes from **Bootstrap Icons**, MIT licensed. For selected brand silhouettes, geometry is derived from **SuperTinyIcons**, MIT licensed, and **Simple Icons**, CC0. Their trademark policies still apply to the respective brands. Material, layout, refraction, color treatment and Android packaging are SkeuoOS work.
+For a small number of generic/system semantic silhouettes, vector bases may come from **Bootstrap Icons** under MIT. Selected brand silhouettes may use **SuperTinyIcons** under MIT and **Simple Icons** under CC0 where appropriate. Trademark rights remain with the respective brands. Material, layout, refraction treatment, Android packaging, variant system and original geometry authored in this repository are SkeuoOS work.
 
-These sources are used specifically to avoid the previous failure mode where recognisable shapes were approximated with hand-entered rectangles, triangles and sampled bitmap curves.
-
-## v3 / early-v4 failures explicitly removed from the reference set
+## Removed failure modes
 
 - shared metallic frame / bevel
 - pseudo-skeuomorphic button shell
 - large outer shadow
-- universal vertical gradient used as fake depth
+- universal gradient used as fake depth
 - white-overlay “glass”
 - tiny glyphs floating inside oversized containers
-- low-point-count polygon approximations of recognisable brand marks
-- bitmap rotation of already-rasterized masks
+- low-point-count polygon approximations of recognisable marks
+- bitmap rotation of already-rasterized masks for reference geometry
 - sampled Bézier-as-thick-line handset geometry
 - zagnut / iOS 6 fallback artwork and importer
+- Gmail being treated as generic email
 
-## Static Android approximations
+## Static Android limitations
 
-Apple's native renderer is dynamic. A PNG icon pack cannot reproduce all of it.
+Not possible in a static OxygenOS PNG:
 
-### Implemented as a static bake
-
-- independent foreground layer materials
-- background / foreground z hierarchy
-- per-layer translucency
-- real under-layer sampling for refraction
-- stronger lens-like refraction at layer boundaries
-- refraction strength and directional offset
-- automatic / inside / outside / off specular modes
-- vertical-light directional specular response
-- restrained per-layer shadow
-- normal, screen, multiply and additive-style blend paths where useful
-- SVG reference masks rasterized at 2048 px
-- Lanczos 512×512 output
-- launcher-safe alpha enclosure and safe-area-oriented artwork
-
-### Not possible in a static OxygenOS PNG
-
-- device-motion-driven highlight movement
+- motion-driven highlight movement
 - real-time environment lighting
-- live wallpaper-dependent refraction after placement on the Home Screen
+- live wallpaper-dependent refraction/distortion
 - Apple's runtime Default / Dark / Clear / Tinted switching from one `.icon` source
 - system HDR icon rendering
-- platform-specific dynamic enclosure adaptation
-
-V4 therefore targets **Default appearance at Home Screen size** and bakes a conservative static snapshot of the material. Dynamic effects are documented rather than replaced by heavy decorative chrome.
+- platform dynamic enclosure adaptation
 
 ## QA policy
 
-`tools/generate_liquid27.py` writes `build/liquid27-v4/qa.json` and `qa.tsv`. `tools/qa_liquid27.py` checks generated resources and preview outputs.
+`tools/generate_liquid27.py --variant all` generates both resource sets under:
 
-Preview contexts:
+- `app/src/color/res/`
+- `app/src/clear/res/`
 
-1. `preview_vector_reference.png` — the 12 SVG2048 geometry references
-2. full contact sheet
-3. light neutral
-4. dark neutral
-5. color-rich wallpaper field
-6. OnePlus/Home-Screen-scale layout
+Preview and QA output is separated under:
+
+- `build/liquid27-v4/color/`
+- `build/liquid27-v4/clear/`
+
+`tools/qa_liquid27.py --variant all` checks both appearances, SVG geometry coverage, optical centering, foreground coverage, contrast and alpha behavior. Clear fails QA if it becomes effectively opaque or effectively invisible. `tools/check_pack.py` verifies that every drawable referenced by the shared OnePlus/OxygenOS mappings exists in **both** flavor resource sets.
