@@ -6,6 +6,7 @@ on:
     paths:
       - 'tools/liquid27/**'
       - 'tools/generate_liquid27.py'
+      - 'tools/generate_clear_validation_previews.py'
       - 'tools/qa_liquid27.py'
       - 'tools/qa_clear_neutral.py'
       - '.github/workflows/clear-preview.yml'
@@ -26,8 +27,8 @@ jobs:
         run: |
           python3 tools/generate_liquid27.py --variant clear --quick
           cp build/liquid27-v4/clear/preview_clear_light.png build/liquid27-v4/clear/preview_clear_flat.png
-      - name: Render color comparison set
-        run: python3 tools/generate_liquid27.py --variant color --quick
+      - name: Render Clear color-response validation set
+        run: python3 tools/generate_clear_validation_previews.py
       - name: Check Clear neutral color bias
         run: python3 tools/qa_clear_neutral.py
       - uses: actions/upload-artifact@v4
@@ -38,7 +39,8 @@ jobs:
             build/liquid27-v4/clear/preview_clear_wallpaper.png
             build/liquid27-v4/clear/preview_home_clear.png
             build/liquid27-v4/clear/preview_clear_flat.png
+            build/liquid27-v4/clear/preview_color_wallpaper.png
+            build/liquid27-v4/clear/preview_home_color.png
+            build/liquid27-v4/clear/preview_neutral_wallpaper.png
             build/liquid27-v4/clear/qa.tsv
-            build/liquid27-v4/color/preview_color_wallpaper.png
-            build/liquid27-v4/color/preview_home_color.png
           if-no-files-found: error
