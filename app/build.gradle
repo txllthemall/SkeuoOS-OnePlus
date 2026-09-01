@@ -31,9 +31,10 @@ android {
     }
 }
 
-// Both variants share geometry. v4.1 gives Clear a spatially varying optical material
-// with local reflections, non-uniform density and stronger transparent regions.
+// One geometry source feeds both appearance flavors. Always use the release
+// vector driver so local/Gradle generation cannot silently fall back to an old
+// experimental v4.1 renderer.
 tasks.register('generateLiquid27Icons', Exec) {
     workingDir rootProject.projectDir
-    commandLine 'python3', 'tools/generate_liquid27_v41.py', '--variant', 'all'
+    commandLine 'python3', 'tools/generate_liquid27_release.py', '--variant', 'all'
 }
