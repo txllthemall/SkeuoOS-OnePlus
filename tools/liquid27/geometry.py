@@ -41,8 +41,6 @@ def _glass(mask, fill='#fff', opacity=.88, refraction=.088, specular='outside', 
     return layer(mask, fill, opacity, refraction, specular, shadow, 'glass', 'normal', (0, -2), 0, 1.2, 3.0)
 
 
-# Only concrete launcher-scale fixes live here. They preserve source geometry
-# that already passed visual review and correct the known outliers.
 OVERRIDE_KINDS = {
     'gamehub', 'playstore', 'weather', 'revanced', 'twogis', 'soundcloud', 'drive', 'appstore',
     'gmail', 'kaspi', 'amazon', 'paypal', 'strava',
@@ -50,7 +48,6 @@ OVERRIDE_KINDS = {
 
 
 def _gamehub():
-    """Filled GameSir/GameHub controller mark; never a nested wireframe."""
     left = svg_mask('''
       <path d="M278 234 H366 L158 512 L226 654 H642 L594 726 H188 L88 512 Z" fill="#fff"/>
     ''')
@@ -116,21 +113,14 @@ def _weather():
 
 
 def _revanced():
-    """Current ReVanced brand geometry: circular ring, V body and top diamond.
-
-    The previous implementation was an invented play-chevron/rail mark. This
-    keeps the recognizable official silhouette while Clear material neutralizes
-    its production color at render time.
-    """
+    """ReVanced ring/V/diamond silhouette based on the current brand mark."""
     ring = svg_mask('''
       <path fill-rule="evenodd" d="M512 150 A362 362 0 1 1 511.9 150 Z M512 194 A318 318 0 1 0 512 830 A318 318 0 1 0 512 194 Z" fill="#fff"/>
     ''')
     vshape = svg_mask('''
       <path d="M372 372 Q366 356 386 356 H424 Q438 356 444 370 L512 538 L580 370 Q586 356 600 356 H638 Q658 356 652 372 L548 626 Q542 640 528 640 H496 Q482 640 476 626 Z" fill="#fff"/>
     ''')
-    diamond = svg_mask('''
-      <path d="M512 246 L570 338 H454 Z" fill="#fff"/>
-    ''')
+    diamond = svg_mask('<path d="M512 246 L570 338 H454 Z" fill="#fff"/>')
     return [
         _glass(ring, '#ffffff', .88, .105, 'inside', .004),
         _glass(vshape, '#ffffff', .92, .112, 'inside', .003),
@@ -139,23 +129,26 @@ def _revanced():
 
 
 def _twogis():
-    """Readable 2GIS launcher mark, replacing the unrelated hex-pin placeholder."""
-    # Use a compact monoline 2GIS wordmark built from vector primitives so the
-    # mark remains recognizable after Clear material conversion and small-scale rendering.
-    two_top = stroked_path_mask('M286 400 C300 332 370 312 430 326 C498 342 516 406 480 454 L298 646 H500', width=54)
-    g_outer = svg_mask('''
-      <path fill-rule="evenodd" d="M630 328 C546 328 500 386 500 500 C500 616 550 684 638 684 C704 684 748 650 766 604 V508 H636 V558 H708 V586 C694 618 672 632 638 632 C584 632 558 586 558 502 C558 420 582 380 632 380 C666 380 690 398 704 430 L758 408 C736 354 694 328 630 328 Z" fill="#fff"/>
+    """2GIS launcher pin silhouette, replacing the broken oversized wordmark.
+
+    The real app identity is dominated by the central map-pin/keyhole shape.
+    Keeping that one strong silhouette survives Clear conversion far better than
+    squeezing a horizontal corporate wordmark into a square launcher glyph.
+    """
+    pin = svg_mask('''
+      <path d="M512 202
+               C370 202 278 306 278 436
+               C278 530 326 594 404 594
+               H432
+               C468 594 486 620 490 664
+               L512 824
+               L534 664
+               C538 620 556 594 592 594
+               H620
+               C698 594 746 530 746 436
+               C746 306 654 202 512 202 Z" fill="#fff"/>
     ''')
-    i_bar = rounded_rect_mask(790, 350, 52, 330, 26)
-    i_dot = circle_mask(816, 292, 31)
-    s_mark = stroked_path_mask('M936 378 C902 340 842 338 808 372 C780 400 794 440 838 458 L896 482 C944 502 952 548 920 582 C884 620 816 614 782 570', width=48)
-    return [
-        _glass(two_top, '#ffffff', .90, .105, 'inside', .003),
-        _glass(g_outer, '#ffffff', .90, .105, 'inside', .003),
-        _glass(i_bar, '#ffffff', .90, .100, 'inside', .002),
-        _glass(i_dot, '#ffffff', .90, .100, 'inside', .002),
-        _glass(s_mark, '#ffffff', .90, .105, 'inside', .003),
-    ]
+    return [_glass(pin, '#ffffff', .92, .116, 'inside', .004)]
 
 
 def _soundcloud():
