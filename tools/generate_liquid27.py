@@ -5,6 +5,7 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from liquid27.material import *
@@ -19,29 +20,32 @@ from liquid27.clear_material import (
     clearify_layers as clearify_v41,
     clear_background as clear_background_v41,
     finish_clear_enclosure as finish_clear_v41,
+    clear_reflection_coverage_pct,
+    reflection_style,
 )
+from liquid27.geometry_meta import geometry_meta
 from liquid27.catalog import ICON_SPECS
 
 ROOT = Path(__file__).resolve().parents[1]
 VARIANTS = ('color', 'clear')
 ALL_VECTOR_KINDS = set(VECTOR_KINDS) | set(HOME_VECTOR_KINDS) | set(BRAND_CURATED_KINDS)
 
-# Deliberately foregrounds the icons the user called out as broken.  This preview
-# is a release gate, not decoration.
+# Every icon the visual review explicitly called out. This sheet is a release
+# gate and deliberately includes marks that previously looked acceptable only
+# at 512 px but failed at launcher scale.
 GEOMETRY_FOCUS = [
     'skeuo_gamehub', 'skeuo_github', 'skeuo_playstore', 'skeuo_kaspi',
     'skeuo_pinterest', 'skeuo_telegram', 'skeuo_gmail', 'skeuo_discord',
     'skeuo_facebook', 'skeuo_reddit', 'skeuo_tiktok', 'skeuo_whatsapp',
     'skeuo_twitter', 'skeuo_steam', 'skeuo_snapchat', 'skeuo_instagram',
+    'skeuo_amazon', 'skeuo_paypal', 'skeuo_strava', 'skeuo_google_drive',
+    'skeuo_chatgpt', 'skeuo_spotify', 'skeuo_youtube', 'skeuo_revanced',
+    'skeuo_chrome', 'skeuo_soundcloud', 'skeuo_2gis',
 ]
 
 
 def base_layers(kind):
-    """Return shared geometry before Color/Clear material treatment.
-
-    Curated brand geometry is intentionally first.  A bad legacy fallback must
-    never override one of the reviewed SVG paths.
-    """
+    """Return shared geometry before Color/Clear material treatment."""
     layers = (
         glyph_brand_curated(kind)
         or glyph_vector_tuned(kind)
@@ -108,6 +112,29 @@ def _sheet(images, outpath, bg, names, cols=5, icon_size=132):
     can.save(outpath)
 
 
+def _wallpaper_canvas(w=1080, h=1640):
+    wall = Image.new('RGB', (w, h), '#6c596b')
+    for col, xy, rad in [
+        ('#d9a4a7', (230, 260), 720),
+        ('#776f98', (850, 420), 760),
+        ('#51455d', (780, 1240), 940),
+    ]:
+        m = ImageOps.invert(Image.radial_gradient('L').resize((rad, rad))).point(lambda v: int(v * .68))
+        fm = Image.new('L', (w, h), 0)
+        fm.paste(m, (xy[0] - rad // 2, xy[1] - rad // 2))
+        wall = Image.composite(Image.new('RGB', (w, h), rgb(col)), wall, fm)
+
+    # High-frequency rails and region boundaries intentionally pass beneath icon
+    # cells. They reveal whether Clear merely paints a grey plate or preserves
+    # background information through its alpha/material hierarchy.
+    wd = ImageDraw.Draw(wall)
+    wd.arc((-300, -260, 850, 650), 8, 122, fill=(241, 231, 234), width=6)
+    wd.arc((-180, 260, 1320, 1120), 8, 126, fill=(229, 221, 229), width=5)
+    wd.arc((250, 750, 1500, 1800), 195, 315, fill=(229, 221, 229), width=5)
+    wd.line((0, 820, w, 690), fill=(82, 69, 82), width=12)
+    return wall
+
+
 def preview(images, outdir, variant):
     show = [
         'skeuo_phone', 'skeuo_messages', 'skeuo_camera', 'skeuo_photos', 'skeuo_settings',
@@ -116,46 +143,39 @@ def preview(images, outdir, variant):
         'skeuo_chrome', 'skeuo_spotify', 'skeuo_instagram', 'skeuo_chatgpt', 'skeuo_gamehub',
         'skeuo_github', 'skeuo_kaspi', 'skeuo_pinterest', 'skeuo_steam', 'skeuo_whatsapp',
     ]
-    _sheet(images, outdir / 'preview_light.png', '#eff0f3', show)
-    _sheet(images, outdir / 'preview_dark.png', '#17181c', show)
+
+    light = outdir / 'preview_light.png'
+    dark = outdir / 'preview_dark.png'
+    _sheet(images, light, '#eff0f3', show)
+    _sheet(images, dark, '#17181c', show)
     _sheet(images, outdir / 'preview_geometry_focus.png', '#252936', GEOMETRY_FOCUS, cols=4, icon_size=144)
+
+    # Explicit release-asset names requested by the design gate.
+    _sheet(images, outdir / f'preview_{variant}_light.png', '#eff0f3', show)
+    _sheet(images, outdir / f'preview_{variant}_dark.png', '#17181c', show)
 
     vector_names = [name for name, (_, kind, _) in ICON_SPECS.items() if kind in ALL_VECTOR_KINDS]
     _sheet(images, outdir / 'preview_vector_reference.png', '#17181c', vector_names, cols=4, icon_size=144)
+    _sheet(images, outdir / 'preview_full.png', '#17181c', list(images.keys()), cols=6, icon_size=118)
 
-    all_names = list(images.keys())
-    _sheet(images, outdir / 'preview_full.png', '#17181c', all_names, cols=6, icon_size=118)
-
-    # Wallpaper preview is essential for Clear.  It exposes fake milky plates,
-    # over-strong reflections and loss of actual alpha immediately.
-    w, h = 1080, 1500
-    wall = Image.new('RGB', (w, h), '#6c596b')
-    for col, xy, rad in [('#d9a4a7', (230, 260), 720), ('#776f98', (850, 420), 760), ('#51455d', (780, 1180), 900)]:
-        m = ImageOps.invert(Image.radial_gradient('L').resize((rad, rad))).point(lambda v: int(v * .68))
-        fm = Image.new('L', (w, h), 0)
-        fm.paste(m, (xy[0] - rad // 2, xy[1] - rad // 2))
-        wall = Image.composite(Image.new('RGB', (w, h), rgb(col)), wall, fm)
-    # Thin curved wallpaper-like rails make alpha/reflection behaviour easy to judge.
-    wd = ImageDraw.Draw(wall)
-    wd.arc((-300, -260, 850, 650), 8, 122, fill=(235, 224, 228), width=5)
-    wd.arc((-180, 260, 1320, 1120), 8, 126, fill=(224, 216, 224), width=4)
-    wd.arc((250, 750, 1500, 1800), 195, 315, fill=(224, 216, 224), width=4)
-
+    wall = _wallpaper_canvas()
     d = ImageDraw.Draw(wall)
     font = ImageFont.truetype(FONT_REG, 22)
-    for i, name in enumerate(GEOMETRY_FOCUS[:16]):
+    focus = GEOMETRY_FOCUS[:20]
+    for i, name in enumerate(focus):
         x = 72 + (i % 4) * 250
-        y = 120 + (i // 4) * 270
+        y = 90 + (i // 4) * 270
         ic = images[name].resize((126, 126), Image.Resampling.LANCZOS)
         wall.paste(ic, (x, y), ic)
         label = name[6:].replace('_', ' ')[:14]
         b = d.textbbox((0, 0), label, font=font)
         d.text((x + 63 - (b[2] - b[0]) / 2, y + 139), label, font=font, fill=(249, 247, 250))
     wall.save(outdir / 'preview_wallpaper.png')
+    wall.save(outdir / f'preview_{variant}_wallpaper.png')
 
-    # Launcher-scale preview.  No enlarged 512px inspection is accepted as the
-    # only visual QA signal.
-    hs = Image.new('RGB', (1080, 1920), (235, 236, 240) if variant == 'color' else (102, 91, 107))
+    # Launcher-scale preview: this, not the 512px source asset, is the decisive
+    # visual signal for mass, centering and small-detail survival.
+    hs = _wallpaper_canvas(1080, 1920)
     d = ImageDraw.Draw(hs)
     f = ImageFont.truetype(FONT_REG, 24)
     for i, name in enumerate(show[:20]):
@@ -165,16 +185,23 @@ def preview(images, outdir, variant):
         hs.paste(ic, (x, y), ic)
         label = name[6:].replace('_', ' ')[:13]
         b = d.textbbox((0, 0), label, font=f)
-        lc = (35, 35, 40) if variant == 'color' else (246, 243, 248)
-        d.text((x + 61 - (b[2] - b[0]) / 2, y + 136), label, font=f, fill=lc)
+        d.text((x + 61 - (b[2] - b[0]) / 2, y + 136), label, font=f, fill=(246, 243, 248))
     hs.save(outdir / 'preview_home.png')
+    hs.save(outdir / f'preview_home_{variant}.png')
+
+
+def _mass_center(mask):
+    a = np.asarray(mask, dtype=np.float64) / 255.0
+    total = float(a.sum())
+    if total <= 1e-8:
+        return WORK / 2.0, WORK / 2.0
+    ys, xs = np.indices(a.shape, dtype=np.float64)
+    return float((xs * a).sum() / total), float((ys * a).sum() / total)
 
 
 def qa(images, outdir, variant):
     rows = []
     for name, (_, kind, _) in ICON_SPECS.items():
-        # Geometry metrics always use the canonical geometry, not Clear's
-        # variable-density optical mask.
         geom_layers = base_layers(kind)
         fg = blank_mask()
         for lay in geom_layers:
@@ -182,35 +209,57 @@ def qa(images, outdir, variant):
         bb = fg.getbbox()
         coverage = sum(fg.getdata()) / (255 * WORK * WORK)
         if bb:
-            cx = (bb[0] + bb[2]) / 2
-            cy = (bb[1] + bb[3]) / 2
-            off = ((cx - WORK / 2) / WORK, (cy - WORK / 2) / WORK)
+            bbox_cx = (bb[0] + bb[2]) / 2
+            bbox_cy = (bb[1] + bb[3]) / 2
         else:
-            off = (0, 0)
+            bbox_cx = bbox_cy = WORK / 2
+        mass_cx, mass_cy = _mass_center(fg)
 
         im = images[name]
         small = im.convert('RGB').resize((64, 64))
         vals = [.2126 * r + .7152 * g + .0722 * b for r, g, b in small.getdata()]
         alpha = list(im.getchannel('A').resize((64, 64)).getdata())
-        engine = 'svg2048-curated' if kind in BRAND_CURATED_KINDS else ('svg2048' if kind in ALL_VECTOR_KINDS else 'legacy')
+        is_vector = kind in ALL_VECTOR_KINDS
+        engine = 'svg2048-curated' if kind in BRAND_CURATED_KINDS else ('svg2048' if is_vector else 'legacy')
+        meta = geometry_meta(kind)
+        reflection_cov = clear_reflection_coverage_pct(name) if variant == 'clear' else 0.0
         rows.append({
             'icon': name,
             'kind': kind,
             'variant': variant,
+            'geometry_source': meta['source'],
+            'renderer': 'cairosvg-2048' if is_vector else 'legacy-pillow',
             'geometry_engine': engine,
+            'legacy': not is_vector,
             'foreground_bbox': bb,
-            'coverage_pct': round(coverage * 100, 1),
-            'center_offset_pct': [round(off[0] * 100, 1), round(off[1] * 100, 1)],
+            'coverage_pct': round(coverage * 100, 2),
+            'center_offset_x': round((bbox_cx - WORK / 2) / WORK * 100, 2),
+            'center_offset_y': round((bbox_cy - WORK / 2) / WORK * 100, 2),
+            'mass_center_offset_x': round((mass_cx - WORK / 2) / WORK * 100, 2),
+            'mass_center_offset_y': round((mass_cy - WORK / 2) / WORK * 100, 2),
+            'optical_dx': meta['optical_dx'],
+            'optical_dy': meta['optical_dy'],
+            'optical_scale': meta['optical_scale'],
             'mean_luminance': round(sum(vals) / len(vals), 1),
             'contrast_estimate': round((max(vals) - min(vals)) / 255, 3),
             'mean_alpha': round(sum(alpha) / len(alpha), 1),
+            'layer_count': len(geom_layers),
+            'clear_reflection_coverage_pct': round(reflection_cov, 4),
+            'clear_reflection_style': reflection_style(name) if variant == 'clear' else 0,
         })
 
     (outdir / 'qa.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
+    fields = [
+        'icon', 'kind', 'variant', 'geometry_source', 'renderer', 'legacy',
+        'foreground_bbox', 'coverage_pct', 'center_offset_x', 'center_offset_y',
+        'mass_center_offset_x', 'mass_center_offset_y', 'optical_dx', 'optical_dy',
+        'optical_scale', 'mean_luminance', 'contrast_estimate', 'mean_alpha',
+        'layer_count', 'clear_reflection_coverage_pct', 'clear_reflection_style',
+    ]
     with (outdir / 'qa.tsv').open('w', encoding='utf-8') as f:
-        f.write('icon\tkind\tvariant\tgeometry_engine\tforeground_bbox\tcoverage_pct\tcenter_offset_pct\tmean_luminance\tcontrast_estimate\tmean_alpha\n')
+        f.write('\t'.join(fields) + '\n')
         for r in rows:
-            f.write(f"{r['icon']}\t{r['kind']}\t{r['variant']}\t{r['geometry_engine']}\t{r['foreground_bbox']}\t{r['coverage_pct']}\t{r['center_offset_pct']}\t{r['mean_luminance']}\t{r['contrast_estimate']}\t{r['mean_alpha']}\n")
+            f.write('\t'.join(str(r[k]) for k in fields) + '\n')
     return rows
 
 
@@ -237,7 +286,7 @@ def generate_variant(variant):
         launch.resize((size, size), Image.Resampling.LANCZOS).save(d / 'ic_launcher.png')
 
     curated = sum(1 for r in rows if r['geometry_engine'] == 'svg2048-curated')
-    vector = sum(1 for r in rows if r['geometry_engine'].startswith('svg2048'))
+    vector = sum(1 for r in rows if not r['legacy'])
     mean_alpha = sum(r['mean_alpha'] for r in rows) / len(rows)
     print(f'Liquid27 {variant}: {len(images)} icons; {curated} curated brands; {vector} vector glyphs; mean alpha {mean_alpha:.1f}')
 
