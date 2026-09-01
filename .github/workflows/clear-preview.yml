@@ -42,5 +42,9 @@ jobs:
             build/liquid27-v4/clear/preview_color_wallpaper.png
             build/liquid27-v4/clear/preview_home_color.png
             build/liquid27-v4/clear/preview_neutral_wallpaper.png
+            build/liquid27-v4/clear/preview_warm_wallpaper.png
+            build/liquid27-v4/clear/preview_blue_wallpaper.png
+            build/liquid27-v4/clear/preview_dark_wallpaper.png
+            build/liquid27-v4/clear/preview_bright_wallpaper.png
             build/liquid27-v4/clear/qa.tsv
           if-no-files-found: error
