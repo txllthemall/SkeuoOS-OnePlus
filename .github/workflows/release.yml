@@ -1,4 +1,4 @@
-name: Release APK
+name: Release APKs
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -23,38 +23,49 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
-      - name: Generate Liquid27 v4 icons
-        run: python3 tools/generate_liquid27.py
+      - name: Generate both Liquid27 appearances
+        run: python3 tools/generate_liquid27.py --variant all
       - name: Visual QA
-        run: python3 tools/qa_liquid27.py
-      - name: Verify pack
+        run: python3 tools/qa_liquid27.py --variant all
+      - name: Verify packs
         run: python3 tools/check_pack.py
-      - run: gradle --no-daemon :app:assembleDebug
+      - name: Build both APKs
+        run: gradle --no-daemon :app:assembleColorDebug :app:assembleClearDebug
       - name: Rename release artifacts
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk SkeuoOS-OnePlus-v4.0.0.apk
-          cp build/liquid27-v4/preview_full.png SkeuoOS-Liquid27-v4-full-preview.png
-          cp build/liquid27-v4/preview_home.png SkeuoOS-Liquid27-v4-home-preview.png
+          cp app/build/outputs/apk/color/debug/app-color-debug.apk SkeuoOS-Liquid27-v4.0.0.apk
+          cp app/build/outputs/apk/clear/debug/app-clear-debug.apk SkeuoOS-Liquid27-Clear-v4.0.0.apk
+          cp build/liquid27-v4/color/preview_full.png SkeuoOS-Liquid27-v4-color-full-preview.png
+          cp build/liquid27-v4/color/preview_home.png SkeuoOS-Liquid27-v4-color-home-preview.png
+          cp build/liquid27-v4/clear/preview_full.png SkeuoOS-Liquid27-v4-clear-full-preview.png
+          cp build/liquid27-v4/clear/preview_home.png SkeuoOS-Liquid27-v4-clear-home-preview.png
+          cp build/liquid27-v4/clear/preview_wallpaper.png SkeuoOS-Liquid27-v4-clear-wallpaper-preview.png
           cp DESIGN_NOTES.md SkeuoOS-Liquid27-v4-DESIGN_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v4.0.0
           name: SkeuoOS Liquid27 v4.0.0
           body: |
-            Clean-room static Android interpretation of Apple's iOS 27 app-icon material system.
+            Two installable OxygenOS icon packs from one shared geometry/rendering codebase.
 
-            - layer-based rendering instead of v3's shared pseudo-skeuomorphic shell
-            - actual under-layer sampling for static refraction
-            - stronger edge refraction and crisp vertical-light specular highlights
-            - restrained translucency and shadows for launcher-scale legibility
-            - curated v4 geometry for the most visible system and third-party apps
-            - 152 existing Android component mappings retained
-            - no iOS 6 / zagnut artwork or importer in the v4 build
-            - full contact sheet, OnePlus-scale preview and design notes included
+            **SkeuoOS Liquid27**
+            - normal color + glass appearance
+            - keeps the original package id for upgrade compatibility
 
-            The native Apple renderer is dynamic; this pack is a static PNG approximation for OxygenOS. It does not contain extracted Apple icon assets and is not affiliated with Apple.
+            **SkeuoOS Liquid27 Clear**
+            - separate `.clear` package id, so it can be installed beside Color
+            - low-chroma partially transparent enclosure and glyph materials
+            - designed to let the real Home Screen wallpaper remain visible through icon alpha
+
+            Both variants share exactly the same icon geometry and component mappings. Gmail has its own Gmail-specific multicolor M geometry in Color and the same M geometry rendered as clear glass in Clear; it never falls back to generic Mail.
+
+            The native Apple renderer is dynamic. These are static Android PNG interpretations for OxygenOS; wallpaper-dependent real-time refraction cannot be reproduced in a static icon pack.
           files: |
-            SkeuoOS-OnePlus-v4.0.0.apk
-            SkeuoOS-Liquid27-v4-full-preview.png
-            SkeuoOS-Liquid27-v4-home-preview.png
+            SkeuoOS-Liquid27-v4.0.0.apk
+            SkeuoOS-Liquid27-Clear-v4.0.0.apk
+            SkeuoOS-Liquid27-v4-color-full-preview.png
+            SkeuoOS-Liquid27-v4-color-home-preview.png
+            SkeuoOS-Liquid27-v4-clear-full-preview.png
+            SkeuoOS-Liquid27-v4-clear-home-preview.png
+            SkeuoOS-Liquid27-v4-clear-wallpaper-preview.png
             SkeuoOS-Liquid27-v4-DESIGN_NOTES.md
