@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from generate_liquid27 import (
     ROOT, FONT_REG, GEOMETRY_FOCUS, HOME_SHOW, QUICK_NAMES,
@@ -90,13 +90,17 @@ def _container_only(optical=True):
 
 
 def _glyph_only(images,optical=True):
+    """True second-dielectric preview vs true static-RGBA glyph alpha."""
     wall=_stress_wallpaper(); d=ImageDraw.Draw(wall); font=ImageFont.truetype(FONT_REG,22)
     names=['skeuo_github','skeuo_discord','skeuo_reddit','skeuo_google_drive','skeuo_revanced','skeuo_2gis','skeuo_gamehub','skeuo_telegram']
     for i,name in enumerate(names):
-        x=72+(i%4)*250; y=180+(i//4)*500; size=126; fm=_foreground_mask(name).resize((size,size),Image.Resampling.LANCZOS)
+        x=72+(i%4)*250; y=180+(i//4)*500; size=126; source_mask=_foreground_mask(name); fm=source_mask.resize((size,size),Image.Resampling.LANCZOS)
         if optical:
-            patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch,_foreground_mask(name)),(x,y))
-        ic=images[name].resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),fm)
+            patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch,source_mask),(x,y))
+        else:
+            ic=images[name].resize((size,size),Image.Resampling.LANCZOS)
+            actual_alpha=ImageChops.multiply(ic.getchannel('A'),fm)
+            wall.paste(ic.convert('RGB'),(x,y),actual_alpha)
         lab=name[6:].replace('_',' '); b=d.textbbox((0,0),lab,font=font); d.text((x+63-(b[2]-b[0])/2,y+139),lab,font=font,fill=(248,248,248))
     return wall
 
@@ -109,7 +113,6 @@ def _material_ab(images):
 
 
 def _android_reality(images): return _material_ab(images)
-
 
 def _android_static(images,kind): return _render_grid(_single_wallpaper(kind),images,GEOMETRY_FOCUS,optical=False)
 
@@ -140,9 +143,7 @@ def main():
     _container_only(True).save(OUTDIR/'preview_container_only.png'); _glyph_only(images,True).save(OUTDIR/'preview_glyph_glass_only.png'); _material_ab(images).save(OUTDIR/'preview_material_ab.png')
     _android_reality(images).save(OUTDIR/'preview_android_reality_check.png'); _container_only(False).save(OUTDIR/'preview_android_container_only.png'); _glyph_only(images,False).save(OUTDIR/'preview_android_glyph_only.png'); _launcher_scale(images).save(OUTDIR/'preview_android_launcher_scale.png')
     for kind in ('warm','blue','dark','bright'): _android_static(images,kind).save(OUTDIR/f'preview_android_static_{kind}.png')
-    _render_grid(_stress_wallpaper(),images,focus,optical=False).save(OUTDIR/'preview_android_static_highcontrast.png')
-    # Android A/B currently compares launcher-real static material against full optics side by side; this deliberately exposes the production gap rather than hiding it.
-    _android_reality(images).save(OUTDIR/'preview_android_material_ab.png')
+    _render_grid(_stress_wallpaper(),images,focus,optical=False).save(OUTDIR/'preview_android_static_highcontrast.png'); _android_reality(images).save(OUTDIR/'preview_android_material_ab.png')
     _debug_surface('normals').save(OUTDIR/'preview_surface_normals.png'); _debug_surface('flow').save(OUTDIR/'preview_optical_flow.png'); _debug_surface('fresnel').save(OUTDIR/'preview_fresnel_field.png')
     print('Generated full optical + static Android Liquid Glass diagnostics.')
 
