@@ -26,13 +26,7 @@ def _mask(size=512):
 
 
 def _optical(kind='midtone', size=512, specular=True, rim=True):
-    bg=wallpaper(kind,(size,size))
-    return render_optical_icon(bg,_mask(size),specular=specular,explicit_rim=rim)
-
-
-def _static(kind='midtone', size=512, specular=True, rim=True):
-    icon=render_static_icon(_mask(size),size,no_specular=not specular,no_rim=not rim)
-    return composite_center(wallpaper(kind,(size,size)),icon,int(size*.64))
+    return render_optical_icon(wallpaper(kind,(size,size)),_mask(size),specular=specular,explicit_rim=rim)
 
 
 def _side_by_side(old,new,bgkind='midtone'):
@@ -42,38 +36,42 @@ def _side_by_side(old,new,bgkind='midtone'):
     board=Image.new('RGB',(1600,600)); board.paste(left,(0,0)); board.paste(right,(800,0)); return board
 
 
+def _launcher_scale(icon):
+    sizes=[48,64,72,96,128]
+    board=Image.new('RGB',(900,660),(36,36,40))
+    kinds=['dark','midtone','bright']
+    for row,kind in enumerate(kinds):
+        bg=wallpaper(kind,(900,220)); board.paste(bg,(0,row*220))
+        for col,sz in enumerate(sizes):
+            ic=icon.resize((sz,sz),Image.Resampling.LANCZOS)
+            x=55+col*165+(128-sz)//2; y=row*220+(220-sz)//2
+            board.paste(ic,(x,y),ic)
+    return board
+
+
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
-    old=_old_github(); mask=_mask(512)
-    new=render_static_icon(mask,512)
+    old=_old_github(); mask=_mask(512); new=render_static_icon(mask,512)
 
-    # Static Android material lab on six backgrounds, no labels and one RGBA asset.
     make_lab(new).save(OUT/'preview_v2_master.png')
     for kind in ('dark','bright','midtone'):
         composite_center(wallpaper(kind,(900,900)),new,360).save(OUT/f'preview_v2_master_{kind}.png')
 
-    # Failure tests. No shadow file is identical by design because v2 static has
-    # no shadow at all; that is itself the proof that depth cannot depend on it.
     nospec=render_static_icon(mask,512,no_specular=True)
     norim=render_static_icon(mask,512,no_rim=True)
     composite_center(wallpaper('midtone',(900,900)),nospec,360).save(OUT/'preview_v2_no_specular.png')
     composite_center(wallpaper('midtone',(900,900)),new,360).save(OUT/'preview_v2_no_shadow.png')
     composite_center(wallpaper('midtone',(900,900)),norim,360).save(OUT/'preview_v2_no_rim.png')
     new.save(OUT/'preview_v2_static_android.png')
+    _launcher_scale(new).save(OUT/'preview_v2_launcher_scale.png')
 
-    # Old-vs-new uses only real RGBA production assets, no preview optics.
     _side_by_side(old,new).save(OUT/'preview_v2_old_vs_new.png')
-
-    # Full optical research render is separate from production Android.
     _optical('midtone',768).save(OUT/'preview_v2_optical_midtone.png')
     _optical('highcontrast',768).save(OUT/'preview_v2_optical_stress.png')
 
-    # Difference heatmap protects against another 'only the highlights changed'.
     a=old.resize((512,512),Image.Resampling.LANCZOS).convert('RGBA')
     b=new.convert('RGBA')
-    diff=ImageChops.difference(a,b).convert('RGB')
-    diff.save(OUT/'preview_v2_difference_heatmap.png')
-
+    ImageChops.difference(a,b).convert('RGB').save(OUT/'preview_v2_difference_heatmap.png')
     print('Liquid Glass v2 GitHub master diagnostics generated:',OUT)
 
 
