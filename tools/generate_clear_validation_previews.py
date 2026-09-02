@@ -33,6 +33,7 @@ def _single_wallpaper(kind,w=1080,h=1640):
         'warm':((102,69,49),(186,124,70),(75,49,39)), 'blue':((29,63,120),(54,112,190),(21,43,82)),
         'dark':((18,18,21),(42,43,49),(8,9,12)), 'bright':((232,229,224),(250,247,240),(207,211,218)),
         'red':((102,32,42),(198,67,78),(73,24,32)), 'cyan':((24,86,96),(53,151,165),(16,59,69)),
+        'midtone':((111,91,111),(151,116,126),(84,75,91)),
     }
     base,accent,low=palettes[kind]; wall=Image.new('RGB',(w,h),base); d=ImageDraw.Draw(wall)
     d.ellipse((-280,-220,int(w*.78),int(h*.62)),fill=accent); d.ellipse((int(w*.35),int(h*.42),int(w*1.28),int(h*1.08)),fill=low)
@@ -62,7 +63,7 @@ def _images():
     return out
 
 
-def _render_grid(wall,images,names,home=False,optical=True):
+def _render_grid(wall,images,names,home=False,optical=True,labels=True):
     d=ImageDraw.Draw(wall); font=ImageFont.truetype(FONT_REG,24 if home else 22); chosen=[n for n in names if n in images][:20]
     for i,name in enumerate(chosen):
         if home: x=92+(i%4)*245; y=270+(i//4)*245; size=122; ly=y+136
@@ -70,7 +71,8 @@ def _render_grid(wall,images,names,home=False,optical=True):
         if optical: _paste_wallpaper_icon(wall,images,name,x,y,size,'clear')
         else:
             ic=images[name].resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),ic)
-        label=name[6:].replace('_',' ')[:14]; box=d.textbbox((0,0),label,font=font); d.text((x+size/2-(box[2]-box[0])/2,ly),label,font=font,fill=(248,248,248))
+        if labels:
+            label=name[6:].replace('_',' ')[:14]; box=d.textbbox((0,0),label,font=font); d.text((x+size/2-(box[2]-box[0])/2,ly),label,font=font,fill=(248,248,248))
     return wall
 
 
@@ -90,7 +92,6 @@ def _container_only(optical=True):
 
 
 def _glyph_only(images,optical=True):
-    """True second-dielectric preview vs true static-RGBA glyph alpha."""
     wall=_stress_wallpaper(); d=ImageDraw.Draw(wall); font=ImageFont.truetype(FONT_REG,22)
     names=['skeuo_github','skeuo_discord','skeuo_reddit','skeuo_google_drive','skeuo_revanced','skeuo_2gis','skeuo_gamehub','skeuo_telegram']
     for i,name in enumerate(names):
@@ -98,9 +99,7 @@ def _glyph_only(images,optical=True):
         if optical:
             patch=wall.crop((x,y,x+size,y+size)); wall.paste(preview_refract_patch(patch,source_mask),(x,y))
         else:
-            ic=images[name].resize((size,size),Image.Resampling.LANCZOS)
-            actual_alpha=ImageChops.multiply(ic.getchannel('A'),fm)
-            wall.paste(ic.convert('RGB'),(x,y),actual_alpha)
+            ic=images[name].resize((size,size),Image.Resampling.LANCZOS); actual_alpha=ImageChops.multiply(ic.getchannel('A'),fm); wall.paste(ic.convert('RGB'),(x,y),actual_alpha)
         lab=name[6:].replace('_',' '); b=d.textbbox((0,0),lab,font=font); d.text((x+63-(b[2]-b[0])/2,y+139),lab,font=font,fill=(248,248,248))
     return wall
 
@@ -113,8 +112,7 @@ def _material_ab(images):
 
 
 def _android_reality(images): return _material_ab(images)
-
-def _android_static(images,kind): return _render_grid(_single_wallpaper(kind),images,GEOMETRY_FOCUS,optical=False)
+def _android_static(images,kind,labels=True): return _render_grid(_single_wallpaper(kind),images,GEOMETRY_FOCUS,optical=False,labels=labels)
 
 
 def _launcher_scale(images):
@@ -124,6 +122,15 @@ def _launcher_scale(images):
         for col,size in enumerate(sizes):
             x=70+col*195; ic=images[name].resize((size,size),Image.Resampling.LANCZOS); wall.paste(ic,(x,y),ic); d.text((x,y+size+10),f'{size}px',font=f,fill=(245,245,245))
     return wall
+
+
+def _github_lab(images):
+    out=Image.new('RGB',(1080,1080),(72,72,72)); kinds=['warm','midtone','blue','dark','bright']
+    names=['skeuo_github']
+    for i,kind in enumerate(kinds):
+        panel=_single_wallpaper(kind,360,360); ic=images['skeuo_github'].resize((190,190),Image.Resampling.LANCZOS); panel.paste(ic,(85,85),ic); out.paste(panel,((i%3)*360,(i//3)*360))
+    panel=_stress_wallpaper(360,360); ic=images['skeuo_github'].resize((190,190),Image.Resampling.LANCZOS); panel.paste(ic,(85,85),ic); out.paste(panel,(720,360))
+    return out
 
 
 def _debug_surface(kind,size=768):
@@ -138,14 +145,23 @@ def _debug_surface(kind,size=768):
 def main():
     OUTDIR.mkdir(parents=True,exist_ok=True); images=_images(); focus=list(GEOMETRY_FOCUS); diag=['skeuo_2gis','skeuo_revanced']+[n for n in focus if n not in ('skeuo_2gis','skeuo_revanced')]
     _render_grid(_color_test_wallpaper(),images,focus).save(OUTDIR/'preview_color_wallpaper.png'); _render_grid(_color_test_wallpaper(1080,1920),images,HOME_SHOW,True).save(OUTDIR/'preview_home_color.png'); _render_grid(_neutral_test_wallpaper(),images,focus).save(OUTDIR/'preview_neutral_wallpaper.png')
-    for kind in ('warm','blue','dark','bright','red','cyan'): _render_grid(_single_wallpaper(kind),images,focus).save(OUTDIR/f'preview_{kind}_wallpaper.png')
+    for kind in ('warm','blue','dark','bright','red','cyan','midtone'): _render_grid(_single_wallpaper(kind),images,focus).save(OUTDIR/f'preview_{kind}_wallpaper.png')
     _render_grid(_stress_wallpaper(),images,diag).save(OUTDIR/'preview_refraction_stress.png'); _render_grid(_stress_wallpaper(),images,focus).save(OUTDIR/'preview_highcontrast_wallpaper.png')
-    _container_only(True).save(OUTDIR/'preview_container_only.png'); _glyph_only(images,True).save(OUTDIR/'preview_glyph_glass_only.png'); _material_ab(images).save(OUTDIR/'preview_material_ab.png')
+    _container_only(True).save(OUTDIR/'preview_container_only.png'); _glyph_only(images,True).save(OUTDIR/'preview_glyph_glass_only.png'); _glyph_only(images,True).save(OUTDIR/'preview_glyph_secondary_lensing.png'); _material_ab(images).save(OUTDIR/'preview_material_ab.png')
     _android_reality(images).save(OUTDIR/'preview_android_reality_check.png'); _container_only(False).save(OUTDIR/'preview_android_container_only.png'); _glyph_only(images,False).save(OUTDIR/'preview_android_glyph_only.png'); _launcher_scale(images).save(OUTDIR/'preview_android_launcher_scale.png')
     for kind in ('warm','blue','dark','bright'): _android_static(images,kind).save(OUTDIR/f'preview_android_static_{kind}.png')
     _render_grid(_stress_wallpaper(),images,focus,optical=False).save(OUTDIR/'preview_android_static_highcontrast.png'); _android_reality(images).save(OUTDIR/'preview_android_material_ab.png')
+
+    # Readability gates: real production RGBA only, no labels and no optical simulation.
+    _github_lab(images).save(OUTDIR/'preview_github_material_lab.png')
+    reps=['skeuo_github','skeuo_telegram','skeuo_discord','skeuo_reddit','skeuo_google_drive','skeuo_gmail','skeuo_twitter','skeuo_snapchat','skeuo_gamehub']
+    _render_grid(_single_wallpaper('midtone'),images,reps,optical=False,labels=False).save(OUTDIR/'preview_representative_NO_LABELS.png')
+    for kind in ('dark','bright','midtone','warm','blue'):
+        _render_grid(_single_wallpaper(kind),images,focus,optical=False,labels=False).save(OUTDIR/f'preview_pack_{kind}_NO_LABELS.png')
+    _render_grid(_single_wallpaper('midtone',1080,1920),images,HOME_SHOW,True,optical=False,labels=False).save(OUTDIR/'preview_android_realistic_home_NO_LABELS.png')
+
     _debug_surface('normals').save(OUTDIR/'preview_surface_normals.png'); _debug_surface('flow').save(OUTDIR/'preview_optical_flow.png'); _debug_surface('fresnel').save(OUTDIR/'preview_fresnel_field.png')
-    print('Generated full optical + static Android Liquid Glass diagnostics.')
+    print('Generated full optical + static Android + no-label readability diagnostics.')
 
 
 if __name__=='__main__': main()
