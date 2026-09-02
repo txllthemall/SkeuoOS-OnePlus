@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-"""Liquid Glass material bridge.
+"""Clear material: optical preview + deliberately separate static Android illusion.
 
-Preview mode uses a coherent normal/thickness/IOR optical model over the real
-wallpaper. Production Android remains a neutral RGBA asset and encodes only
-wallpaper-independent glass cues.
+The Android path never samples wallpaper.  It uses neutral dual-luminance
+interfaces and alpha topology; the preview path uses the real dielectric optics.
 """
 
 import hashlib
 from functools import lru_cache
-
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
@@ -32,12 +30,14 @@ def reflection_style(key: str) -> int:
 
 @lru_cache(maxsize=256)
 def clear_reflection_mask(key: str) -> Image.Image:
-    s=enclosure_surface(WORK); flip=-1.0 if (_seed(key,409)&1) else 1.0
+    s = enclosure_surface(WORK)
+    flip = -1.0 if (_seed(key,409)&1) else 1.0
     lx,ly,lz=-.50*flip,-.72,.48; lm=(lx*lx+ly*ly+lz*lz)**.5; lx,ly,lz=lx/lm,ly/lm,lz/lm
     hx,hy,hz=lx,ly,lz+1.; hm=(hx*hx+hy*hy+hz*hz)**.5; hx,hy,hz=hx/hm,hy/hm,hz/hm
-    ndoth=np.clip(s['nx']*hx+s['ny']*hy+s['nz']*hz,0,1); power=30. if reflection_style(key)==1 else 24.
-    spec=(ndoth**power)*np.clip(s['fmid']*1.65+s['ftight']*1.90,0,1)
-    return _mask(np.clip(spec*(.52 if reflection_style(key)==1 else .62),0,.46))
+    ndoth=np.clip(s['nx']*hx+s['ny']*hy+s['nz']*hz,0,1)
+    # Small sharp catch only. It cannot carry the material by itself.
+    spec=(ndoth**38.)*np.clip(s['fmid']*1.2+s['ftight']*1.5,0,1)
+    return _mask(np.clip(spec*.34,0,.30))
 
 
 def clear_reflection_coverage_pct(key: str) -> float:
@@ -46,64 +46,88 @@ def clear_reflection_coverage_pct(key: str) -> float:
 
 @lru_cache(maxsize=1)
 def _static_enclosure_fields():
+    """Neutral RGBA topology for launchers: body, curved shell, lip and dark interface."""
     s=enclosure_surface(WORK)
-    body=(.008+.020*s['mid']+.044*s['fsoft']+.088*s['fmid']+.150*s['ftight'])*s['inside']
-    inner_interface=np.clip((s['edge']**1.35)*(.028+.068*s['fmid']),0,.10); density=np.clip(body+inner_interface,0,.23)
+    # This is intentionally a structural break from the old pale plate.  The
+    # body is neutral middle-gray at low alpha, so it gently darkens bright
+    # wallpapers and lifts dark wallpapers without knowing either wallpaper.
+    body=(.030+.018*s['mid']+.035*s['fsoft'])*s['inside']
+    shell=(.055*s['edge']+.105*s['rim']+.115*s['very_rim'])*s['inside']
+    density=np.clip(body+shell,0,.27)
     lx,ly,lz=-.52,-.70,.49; lm=(lx*lx+ly*ly+lz*lz)**.5; lx,ly,lz=lx/lm,ly/lm,lz/lm
     hx,hy,hz=lx,ly,lz+1.; hm=(hx*hx+hy*hy+hz*hz)**.5; hx,hy,hz=hx/hm,hy/hm,hz/hm
-    ndoth=np.clip(s['nx']*hx+s['ny']*hy+s['nz']*hz,0,1); spec=(ndoth**32.)*np.clip(s['fmid']*1.35+s['ftight']*2.0,0,1); spec=np.clip(spec*.50,0,.40)
-    opposite=np.clip(-(s['nx']*lx+s['ny']*ly),0,1)**2.7; dark=np.clip(opposite*(.045*s['edge']+.13*s['fmid']+.075*s['ftight']),0,.16)
-    return _mask(density),_mask(spec),_mask(dark)
+    ndoth=np.clip(s['nx']*hx+s['ny']*hy+s['nz']*hz,0,1)
+    spec=np.clip((ndoth**34.)*(s['fmid']*.75+s['ftight']*1.35)*.34,0,.28)
+    opposite=np.clip(-(s['nx']*lx+s['ny']*ly),0,1)**2.3
+    dark=np.clip(opposite*(.055*s['edge']+.125*s['rim']+.105*s['very_rim']),0,.19)
+    # A second internal interface makes the shell read as volume, not outline.
+    internal=np.clip(np.exp(-((s['q']-.78)/.055)**2)*(.035+.055*np.clip(-s['ny'],0,1)),0,.085)*s['inside']
+    return _mask(density),_mask(spec),_mask(dark),_mask(internal)
 
 
-def _glyph_static_density(mask: Image.Image):
-    broad=mask.filter(ImageFilter.GaussianBlur(7.0)); inner=inner_edge(mask,11).filter(ImageFilter.GaussianBlur(4.5)); tight=inner_edge(mask,3.0).filter(ImageFilter.GaussianBlur(.8))
-    body=Image.new('L',(WORK,WORK),54); field=ImageChops.add(body,inner.point(lambda v:int(v*.16))); field=ImageChops.add(field,tight.point(lambda v:int(v*.31))); field=ImageChops.add(field,broad.point(lambda v:int(v*.026)))
-    return inter(field,mask)
+def _glyph_static_masks(mask: Image.Image):
+    """Build a translucent insert. No material='glass' clamp, no opaque white fill."""
+    broad=mask.filter(ImageFilter.GaussianBlur(5.5))
+    core=inter(broad,mask)
+    edge_w=inner_edge(mask,10.0).filter(ImageFilter.GaussianBlur(2.8))
+    edge_t=inner_edge(mask,2.3).filter(ImageFilter.GaussianBlur(.65))
+    top=top_facing_edge(mask,2.3).filter(ImageFilter.GaussianBlur(.55))
+    low=bottom_facing_edge(mask,2.7).filter(ImageFilter.GaussianBlur(.60))
+    # body alpha around 7-10%, edges materially denser; still transparent.
+    body=core.point(lambda v:int(v*.090))
+    wide=edge_w.point(lambda v:int(v*.155))
+    tight=edge_t.point(lambda v:int(v*.31))
+    hi=top.point(lambda v:int(v*.42))
+    dk=low.point(lambda v:int(v*.36))
+    return body,wide,tight,hi,dk
 
 
 def clearify_layers(layers,key:str):
-    """Static Android glyphs use dual-contrast interfaces, not a white body."""
+    """Static glyph = neutral translucent dielectric illusion, never white SVG."""
     result=[]
     for src in layers:
-        item=dict(src); mask=item['mask']; src_luma=luminance(item.get('fill','#fff'))
-        item['mask']=_glyph_static_density(mask); item['material']='glass'; item['fill']='#bcbcbc' if src_luma<145 else '#cecece'; item['opacity']=.068 if src_luma<145 else .080
-        item['refraction']=max(.15,min(.22,float(item.get('refraction',.07))*1.8)); item['specular']='off'; item['shadow']=0.00004; item['blur']=0; item['blend']='normal'; result.append(item)
-        top=top_facing_edge(mask,2.0).filter(ImageFilter.GaussianBlur(.42)).point(lambda v:int(v*.42))
-        if top.getbbox(): result.append(layer(top,'#ffffff',.145,0,'off',0,'ink','screen',(0,0),0,0,0))
-        inner=inner_edge(mask,1.8).filter(ImageFilter.GaussianBlur(.58)).point(lambda v:int(v*.15))
-        if inner.getbbox(): result.append(layer(inner,'#ededed',.060,0,'off',0,'ink','screen',(0,0),0,0,0))
-        low=bottom_facing_edge(mask,2.1).filter(ImageFilter.GaussianBlur(.42)).point(lambda v:int(v*.52))
-        if low.getbbox(): result.append(layer(low,'#171717',.245,0,'off',0,'ink','multiply',(0,0),0,0,0))
+        mask=src['mask']; body,wide,tight,hi,dk=_glyph_static_masks(mask)
+        # Mid-gray body is intentionally dual-purpose: visible by contrast on
+        # both bright and dark backgrounds while remaining chromatically neutral.
+        result.append(layer(body,'#8e8e8e',1.0,0,'off',0,'ink','normal',(0,0),0,0,0))
+        result.append(layer(wide,'#a8a8a8',.72,0,'off',0,'ink','normal',(0,0),0,0,0))
+        result.append(layer(tight,'#d6d6d6',.58,0,'off',0,'ink','screen',(0,0),0,0,0))
+        if hi.getbbox(): result.append(layer(hi,'#ffffff',.42,0,'off',0,'ink','screen',(0,0),0,0,0))
+        if dk.getbbox(): result.append(layer(dk,'#151515',.58,0,'off',0,'ink','multiply',(0,0),0,0,0))
     return result
 
 
 def clear_background(key:str)->Image.Image:
-    canvas=Image.new('RGBA',(WORK,WORK),(0,0,0,0)); density,spec,dark=_static_enclosure_fields()
-    neutral=Image.new('RGBA',(WORK,WORK),(218,218,218,0)); neutral.putalpha(density); canvas.alpha_composite(neutral)
+    canvas=Image.new('RGBA',(WORK,WORK),(0,0,0,0)); density,spec,dark,internal=_static_enclosure_fields()
+    # Neutral middle-gray transmission body instead of the old pale white plate.
+    neutral=Image.new('RGBA',(WORK,WORK),(142,142,142,0)); neutral.putalpha(density); canvas.alpha_composite(neutral)
+    inside=Image.new('RGBA',(WORK,WORK),(205,205,205,0)); inside.putalpha(internal); canvas.alpha_composite(inside)
     white=Image.new('RGBA',(WORK,WORK),(255,255,255,0)); white.putalpha(ImageChops.lighter(spec,clear_reflection_mask(key))); canvas.alpha_composite(white)
-    dk=Image.new('RGBA',(WORK,WORK),(24,24,24,0)); dk.putalpha(dark); canvas.alpha_composite(dk); return canvas
+    dk=Image.new('RGBA',(WORK,WORK),(22,22,22,0)); dk.putalpha(dark); canvas.alpha_composite(dk)
+    return canvas
 
 
 def finish_clear_enclosure(canvas:Image.Image,key:str)->None:
-    hair=outer_edge(ENCL,.70).point(lambda v:int(v*.095)); h=Image.new('RGBA',(WORK,WORK),(246,246,246,0)); h.putalpha(hair); canvas.alpha_composite(h)
-    # Two neutral interfaces are deliberately asymmetric so the same RGBA asset
-    # keeps contrast on both near-black and near-white wallpapers.
-    low=bottom_facing_edge(ENCL,1.35).filter(ImageFilter.GaussianBlur(.35)).point(lambda v:int(v*.22)); d=Image.new('RGBA',(WORK,WORK),(20,20,20,0)); d.putalpha(low); canvas.alpha_composite(d)
-    dark=outer_edge(ENCL,.55).point(lambda v:int(v*.028)); dd=Image.new('RGBA',(WORK,WORK),(24,24,24,0)); dd.putalpha(dark); canvas.alpha_composite(dd)
+    # Three nested optical interfaces, deliberately low-area. The wide shell is
+    # already encoded in clear_background; these are not the material itself.
+    hair=outer_edge(ENCL,.65).point(lambda v:int(v*.10)); h=Image.new('RGBA',(WORK,WORK),(248,248,248,0)); h.putalpha(hair); canvas.alpha_composite(h)
+    inner=inner_edge(ENCL,2.1).filter(ImageFilter.GaussianBlur(.55)).point(lambda v:int(v*.075)); ii=Image.new('RGBA',(WORK,WORK),(232,232,232,0)); ii.putalpha(inner); canvas.alpha_composite(ii)
+    low=bottom_facing_edge(ENCL,2.0).filter(ImageFilter.GaussianBlur(.45)).point(lambda v:int(v*.26)); d=Image.new('RGBA',(WORK,WORK),(18,18,18,0)); d.putalpha(low); canvas.alpha_composite(d)
     canvas.putalpha(inter(canvas.getchannel('A'),ENCL))
 
 
 def preview_refract_patch(under:Image.Image,foreground_mask:Image.Image|None=None)->Image.Image:
     result,_,_,_=composite_container(under.convert('RGB'))
-    if foreground_mask is not None and foreground_mask.getbbox(): result,_,_,_=composite_glyph(result,foreground_mask)
+    if foreground_mask is not None and foreground_mask.getbbox():
+        result,_,_,_=composite_glyph(result,foreground_mask)
     return result
 
 
 @lru_cache(maxsize=1)
 def _metric_base():
     s=enclosure_surface(128); dummy=Image.new('RGB',(128,128),(128,128,128)); _,dx,dy,_=composite_container(dummy); disp=np.sqrt(dx*dx+dy*dy)
-    center=s['q']<.34; mid=(s['q']>=.46)&(s['q']<.72); edge=(s['q']>=.84)&(s['q']<=1.0); dens=np.asarray(_static_enclosure_fields()[0].resize((128,128),Image.Resampling.LANCZOS),dtype=np.float32)
+    center=s['q']<.34; mid=(s['q']>=.46)&(s['q']<.72); edge=(s['q']>=.84)&(s['q']<=1.0)
+    dens=np.asarray(_static_enclosure_fields()[0].resize((128,128),Image.Resampling.LANCZOS),dtype=np.float32)
     return {'enclosure_center_density':float(dens[center].mean()),'enclosure_edge_density':float(dens[edge].mean()),'specular_coverage_pct':float((s['fmid']>.12).mean()*100),'refraction_displacement_mean':float(disp[s['inside']>0].mean()),'refraction_displacement_median':float(np.median(disp[s['inside']>0])),'refraction_displacement_max':float(disp.max()),'refraction_center_mean':float(disp[center].mean()),'refraction_mid_mean':float(disp[mid].mean()),'refraction_edge_mean':float(disp[edge].mean()),'fresnel_center_mean':float(s['fresnel'][center].mean()),'fresnel_edge_mean':float(s['fresnel'][edge].mean())}
 
 
