@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-"""Clear material with two deliberately different products.
+"""Clear material with separate optical preview and static Android products.
 
-Preview mode can use wallpaper-dependent optics. Static Android assets cannot,
-so the production material is a perceptual RGBA construction: a very light
-shell plus a distinctly denser, still-translucent glass glyph. The two must
-remain readable at launcher scale without labels or wallpaper sampling.
+Static Android cannot sample wallpaper. Its glass therefore relies on a clean
+shell plus a denser glyph built from broad neutral light/dark body lobes and
+multi-scale interfaces. The glyph must remain recognizable without labels at
+launcher scale while still transmitting the wallpaper through its RGBA alpha.
 """
 
 import hashlib
 from functools import lru_cache
 import numpy as np
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 from .material import WORK, ENCL, inter, inner_edge, outer_edge, top_facing_edge, bottom_facing_edge, layer
 from .glass_surface import enclosure_surface
@@ -51,11 +51,11 @@ def clear_reflection_coverage_pct(key: str) -> float:
 
 @lru_cache(maxsize=1)
 def _static_enclosure_fields():
-    """Low-density shell. Container must never compete with the glyph."""
+    """Low-density shell. Container remains subordinate to the glyph."""
     s = enclosure_surface(WORK)
-    body = (.015 + .012*s['mid'] + .020*s['fsoft']) * s['inside']
-    curved = (.036*s['edge'] + .080*s['rim'] + .105*s['very_rim']) * s['inside']
-    density = np.clip(body + curved, 0, .18)
+    body = (.020 + .014*s['mid'] + .022*s['fsoft']) * s['inside']
+    curved = (.045*s['edge'] + .095*s['rim'] + .125*s['very_rim']) * s['inside']
+    density = np.clip(body + curved, 0, .22)
 
     lx, ly, lz = -.52, -.70, .49
     lm = (lx*lx + ly*ly + lz*lz) ** .5
@@ -67,60 +67,70 @@ def _static_enclosure_fields():
     spec = np.clip((ndoth**31.0) * (s['fmid']*.55 + s['ftight']*1.05) * .30, 0, .22)
 
     opposite = np.clip(-(s['nx']*lx + s['ny']*ly), 0, 1) ** 2.2
-    dark = np.clip(opposite * (.045*s['edge'] + .090*s['rim'] + .090*s['very_rim']), 0, .14)
+    dark = np.clip(opposite * (.050*s['edge'] + .105*s['rim'] + .100*s['very_rim']), 0, .16)
 
-    # Broad inner interface, not a hairline border.
-    internal = np.exp(-((s['q']-.76)/.075)**2) * (.030 + .045*np.clip(-s['ny'], 0, 1))
-    internal = np.clip(internal, 0, .070) * s['inside']
+    internal = np.exp(-((s['q']-.76)/.075)**2) * (.034 + .050*np.clip(-s['ny'], 0, 1))
+    internal = np.clip(internal, 0, .080) * s['inside']
     return _mask(density), _mask(spec), _mask(dark), _mask(internal)
 
 
-def _glyph_static_masks(mask: Image.Image):
-    """Build a denser glass insert with body mass and dual-luminance edges.
+def _body_lobes(mask: Image.Image):
+    """Broad directional body response, not a hairline bevel.
 
-    The core is intentionally visible. This is the key break from run #60:
-    large solid logos cannot be outline ghosts anymore.
+    Light and dark coexist inside the glyph so one static PNG preserves
+    recognition on black, white and midtone wallpapers.
     """
-    soft = mask.filter(ImageFilter.GaussianBlur(4.2))
-    core = inter(soft, mask)
-    # Wide curved body zone and two nested interfaces.
-    wide = inner_edge(mask, 13.0).filter(ImageFilter.GaussianBlur(3.4))
-    inner = inner_edge(mask, 5.0).filter(ImageFilter.GaussianBlur(1.6))
-    tight = inner_edge(mask, 2.0).filter(ImageFilter.GaussianBlur(.55))
-    top = top_facing_edge(mask, 2.6).filter(ImageFilter.GaussianBlur(.60))
-    low = bottom_facing_edge(mask, 2.9).filter(ImageFilter.GaussianBlur(.65))
+    core = inter(mask.filter(ImageFilter.GaussianBlur(3.2)), mask)
+    grad = Image.linear_gradient('L').resize((WORK, WORK))
+    top_weight = ImageOps.invert(grad).point(lambda v: int(((v/255.0)**1.35)*255))
+    low_weight = grad.point(lambda v: int(((v/255.0)**1.55)*255))
+    hi = inter(core, top_weight).point(lambda v: int(v * .175))
+    lo = inter(core, low_weight).point(lambda v: int(v * .155))
+    return hi, lo
 
-    # Meaningful body mass: wallpaper still shows through, but the silhouette
-    # survives at 64-96 px. Edge zones are denser than the interior.
-    body = core.point(lambda v: int(v * .225))
-    curved = wide.point(lambda v: int(v * .235))
-    internal = inner.point(lambda v: int(v * .190))
-    bright = tight.point(lambda v: int(v * .340))
-    spec = top.point(lambda v: int(v * .455))
-    dark = low.point(lambda v: int(v * .430))
-    return body, curved, internal, bright, spec, dark
+
+def _glyph_static_masks(mask: Image.Image):
+    soft = mask.filter(ImageFilter.GaussianBlur(4.0))
+    core = inter(soft, mask)
+    wide = inner_edge(mask, 14.0).filter(ImageFilter.GaussianBlur(3.8))
+    inner = inner_edge(mask, 5.5).filter(ImageFilter.GaussianBlur(1.8))
+    tight = inner_edge(mask, 2.1).filter(ImageFilter.GaussianBlur(.60))
+    top = top_facing_edge(mask, 2.8).filter(ImageFilter.GaussianBlur(.62))
+    low = bottom_facing_edge(mask, 3.0).filter(ImageFilter.GaussianBlur(.68))
+    hi_body, low_body = _body_lobes(mask)
+
+    # The base core is intentionally moderate. Recognition comes from the sum of
+    # core + broad directional lobes + curved interfaces, not from a flat fill.
+    body = core.point(lambda v: int(v * .175))
+    curved = wide.point(lambda v: int(v * .255))
+    internal = inner.point(lambda v: int(v * .210))
+    bright = tight.point(lambda v: int(v * .370))
+    spec = top.point(lambda v: int(v * .470))
+    dark = low.point(lambda v: int(v * .455))
+    return body, hi_body, low_body, curved, internal, bright, spec, dark
 
 
 def clearify_layers(layers, key: str):
-    """Static glyph = readable translucent glass, not white fill and not ghost."""
+    """Static glyph = readable translucent glass, never a run-60 ghost."""
     result = []
     for src in layers:
         mask = src['mask']
-        body, curved, internal, bright, spec, dark = _glyph_static_masks(mask)
+        body, hi_body, low_body, curved, internal, bright, spec, dark = _glyph_static_masks(mask)
 
-        # Mid-neutral optical mass. This is intentionally stronger than the
-        # enclosure and is the primary source of recognition at launcher scale.
-        result.append(layer(body, '#9a9a9a', 1.0, 0, 'off', 0, 'ink', 'normal', (0,0), 0,0,0))
-        result.append(layer(curved, '#b2b2b2', .90, 0, 'off', 0, 'ink', 'normal', (0,0), 0,0,0))
-        result.append(layer(internal, '#7e7e7e', .62, 0, 'off', 0, 'ink', 'multiply', (0,0), 0,0,0))
+        # Neutral mass plus opposite broad body lobes. Wallpaper remains visible
+        # because every component is low-alpha, but the silhouette survives.
+        result.append(layer(body, '#9e9e9e', 1.0, 0, 'off', 0, 'ink', 'normal', (0,0), 0,0,0))
+        result.append(layer(hi_body, '#f1f1f1', 1.0, 0, 'off', 0, 'ink', 'normal', (0,0), 0,0,0))
+        result.append(layer(low_body, '#303030', 1.0, 0, 'off', 0, 'ink', 'normal', (0,0), 0,0,0))
+        result.append(layer(curved, '#b9b9b9', .94, 0, 'off', 0, 'ink', 'normal', (0,0), 0,0,0))
+        result.append(layer(internal, '#727272', .68, 0, 'off', 0, 'ink', 'multiply', (0,0), 0,0,0))
 
-        # Dual-luminance interfaces keep recognition on both black and white.
         if bright.getbbox():
-            result.append(layer(bright, '#eeeeee', .78, 0, 'off', 0, 'ink', 'screen', (0,0), 0,0,0))
+            result.append(layer(bright, '#eeeeee', .82, 0, 'off', 0, 'ink', 'screen', (0,0), 0,0,0))
         if spec.getbbox():
-            result.append(layer(spec, '#ffffff', .48, 0, 'off', 0, 'ink', 'screen', (0,0), 0,0,0))
+            result.append(layer(spec, '#ffffff', .50, 0, 'off', 0, 'ink', 'screen', (0,0), 0,0,0))
         if dark.getbbox():
-            result.append(layer(dark, '#101010', .68, 0, 'off', 0, 'ink', 'multiply', (0,0), 0,0,0))
+            result.append(layer(dark, '#0d0d0d', .72, 0, 'off', 0, 'ink', 'multiply', (0,0), 0,0,0))
     return result
 
 
@@ -128,34 +138,18 @@ def clear_background(key: str) -> Image.Image:
     canvas = Image.new('RGBA', (WORK, WORK), (0,0,0,0))
     density, spec, dark, internal = _static_enclosure_fields()
 
-    # Container is a subtle shell, not a plate. Mid-neutral RGB lets it retain
-    # contrast on both dark and bright backgrounds without baked wallpaper hue.
-    neutral = Image.new('RGBA', (WORK,WORK), (150,150,150,0))
-    neutral.putalpha(density)
-    canvas.alpha_composite(neutral)
-
-    inside = Image.new('RGBA', (WORK,WORK), (202,202,202,0))
-    inside.putalpha(internal)
-    canvas.alpha_composite(inside)
-
-    white = Image.new('RGBA', (WORK,WORK), (255,255,255,0))
-    white.putalpha(ImageChops.lighter(spec, clear_reflection_mask(key)))
-    canvas.alpha_composite(white)
-
-    dk = Image.new('RGBA', (WORK,WORK), (18,18,18,0))
-    dk.putalpha(dark)
-    canvas.alpha_composite(dk)
+    neutral = Image.new('RGBA', (WORK,WORK), (150,150,150,0)); neutral.putalpha(density); canvas.alpha_composite(neutral)
+    inside = Image.new('RGBA', (WORK,WORK), (202,202,202,0)); inside.putalpha(internal); canvas.alpha_composite(inside)
+    white = Image.new('RGBA', (WORK,WORK), (255,255,255,0)); white.putalpha(ImageChops.lighter(spec, clear_reflection_mask(key))); canvas.alpha_composite(white)
+    dk = Image.new('RGBA', (WORK,WORK), (18,18,18,0)); dk.putalpha(dark); canvas.alpha_composite(dk)
     return canvas
 
 
 def finish_clear_enclosure(canvas: Image.Image, key: str) -> None:
-    # Keep explicit rims low-energy. Material must survive if these are removed.
     hair = outer_edge(ENCL, .65).point(lambda v: int(v * .070))
     h = Image.new('RGBA', (WORK,WORK), (248,248,248,0)); h.putalpha(hair); canvas.alpha_composite(h)
-
     inner = inner_edge(ENCL, 2.4).filter(ImageFilter.GaussianBlur(.70)).point(lambda v: int(v * .060))
     ii = Image.new('RGBA', (WORK,WORK), (228,228,228,0)); ii.putalpha(inner); canvas.alpha_composite(ii)
-
     low = bottom_facing_edge(ENCL, 2.2).filter(ImageFilter.GaussianBlur(.50)).point(lambda v: int(v * .205))
     d = Image.new('RGBA', (WORK,WORK), (15,15,15,0)); d.putalpha(low); canvas.alpha_composite(d)
     canvas.putalpha(inter(canvas.getchannel('A'), ENCL))
