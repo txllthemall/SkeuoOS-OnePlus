@@ -5,6 +5,7 @@ on:
     branches: [ v4.1-clear-glass ]
     paths:
       - 'tools/liquid27/**'
+      - 'tools/liquid_glass_v2/**'
       - 'tools/generate_liquid27.py'
       - 'tools/generate_clear_validation_previews.py'
       - 'tools/qa_liquid27.py'
@@ -29,6 +30,8 @@ jobs:
           cp build/liquid27-v4/clear/preview_clear_light.png build/liquid27-v4/clear/preview_clear_flat.png
       - name: Render Clear optical and Android validation set
         run: python3 tools/generate_clear_validation_previews.py
+      - name: Render independent Liquid Glass v2 GitHub master
+        run: python3 tools/liquid_glass_v2/render_master.py
       - name: Check Clear neutral color bias
         run: python3 tools/qa_clear_neutral.py
       - uses: actions/upload-artifact@v4
@@ -77,4 +80,5 @@ jobs:
             build/liquid27-v4/clear/preview_surface_normals.png
             build/liquid27-v4/clear/preview_fresnel_field.png
             build/liquid27-v4/clear/qa.tsv
+            build/liquid-glass-v2/*.png
           if-no-files-found: error
