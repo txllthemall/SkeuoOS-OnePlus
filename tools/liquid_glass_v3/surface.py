@@ -11,23 +11,28 @@ FloatMap = np.ndarray
 
 @dataclass(frozen=True)
 class SurfaceParams:
-    # The V3 shell is intentionally a broad optical volume, not a narrow bevel.
-    edge_width_px: float = 78.0
-    center_height: float = 0.74
-    edge_height: float = 0.08
+    # Broad curved shell. The exact silhouette boundary is no longer a height
+    # discontinuity: front/back surfaces taper continuously to the outline.
+    edge_width_px: float = 82.0
+    boundary_taper_px: float = 13.0
+    center_height: float = 0.78
+    edge_height: float = 0.018
 
-    # Back surface is derived independently through a varying thickness field.
-    # The material is thinner through the clear core and substantially thicker
-    # near grazing edges, which gives the baker a real second interface.
-    back_depth: float = 0.22
-    edge_thickness_gain: float = 0.34
+    # True optical thickness is zero at the silhouette, swells just inside the
+    # curved lip, then settles to a thinner clear core. This replaces the old
+    # "maximum thickness at the final pixel" shape that generated derivative
+    # spikes and made refraction look torn.
+    back_depth: float = 0.235
+    edge_thickness_gain: float = 0.275
+    edge_thickness_peak: float = 0.30
+    edge_thickness_width: float = 0.19
 
-    # Glyph is a second volume. Its front surface rises while its back surface
-    # is slightly recessed because mass gain is greater than front relief.
-    glyph_relief: float = 0.20
-    glyph_mass_gain: float = 0.31
-    glyph_bevel_width_px: float = 18.0
-    normal_scale: float = 2.20
+    # Glyph is a second volume, also tapered continuously at its own boundary.
+    glyph_relief: float = 0.205
+    glyph_mass_gain: float = 0.325
+    glyph_bevel_width_px: float = 20.0
+    glyph_boundary_taper_px: float = 4.5
+    normal_scale: float = 2.10
 
 
 @dataclass
@@ -49,8 +54,6 @@ class SurfaceMaps:
     back_height: FloatMap
     thickness: FloatMap
 
-    # `normals` and `slope` remain aliases for the front surface so existing
-    # diagnostics keep working, while V3 material can use both interfaces.
     normals: FloatMap
     front_normals: FloatMap
     back_normals: FloatMap
@@ -117,7 +120,6 @@ def _edt_1d(f: np.ndarray) -> np.ndarray:
 
 
 def _distance_to_true(seed: np.ndarray) -> FloatMap:
-    """Exact Euclidean distance in pixels to nearest True seed."""
     inf = 1.0e12
     f = np.where(seed, 0.0, inf).astype(np.float64)
     h, w = f.shape
@@ -173,12 +175,26 @@ def _img_to_mask(im: Image.Image, size: int) -> FloatMap:
 
 
 def _interior_crown(sdf: FloatMap, mask: FloatMap) -> FloatMap:
-    """Low-frequency convex crown over the full interior, not just the rim."""
     positive = np.maximum(sdf, 0.0)
     vals = positive[mask > 0.5]
     max_d = float(np.percentile(vals, 99.0)) if vals.size else 1.0
     max_d = max(max_d, 1.0)
     return smootherstep(np.clip(positive / (0.92 * max_d), 0.0, 1.0)) * (mask > 0.01)
+
+
+def _effective_inside_distance(sdf: FloatMap) -> FloatMap:
+    """Approximate distance from the continuous half-pixel silhouette.
+
+    A binary EDT reports about one pixel for the first interior pixel. Removing
+    0.75 px makes our geometric fields converge toward zero at the true vector
+    boundary rather than jumping between the last outside and first inside texel.
+    """
+    return np.maximum(sdf - 0.75, 0.0).astype(np.float32)
+
+
+def _gaussian_lobe(x: FloatMap, center: float, width: float) -> FloatMap:
+    width = max(float(width), 1e-4)
+    return np.exp(-0.5 * np.square((x - float(center)) / width)).astype(np.float32)
 
 
 def build_surface_maps(
@@ -193,53 +209,72 @@ def build_surface_maps(
 
     cm = _img_to_mask(container_mask, size)
     gm = _img_to_mask(glyph_mask, size)
-
     csdf = signed_distance(cm)
     gsdf = signed_distance(gm)
 
-    # Front shell = broad edge curvature plus a weak full-body crown. This
-    # removes the V2/V3-alpha "flat plateau surrounded by a rim" failure mode.
-    positive_c = np.maximum(csdf, 0.0)
+    # ------------------------------------------------------------------ shell
+    # Build a continuous convex front surface. Both height and thickness taper
+    # at the true outline, so front/back normals describe a rounded volume rather
+    # than two fields with discontinuous cliffs at the alpha mask boundary.
+    positive_c = _effective_inside_distance(csdf)
     edge_u = np.clip(positive_c / max(params.edge_width_px, 1e-3), 0.0, 1.0)
     edge_profile = smootherstep(edge_u)
+    boundary_taper = smootherstep(
+        np.clip(positive_c / max(params.boundary_taper_px, 1e-3), 0.0, 1.0)
+    )
     crown = _interior_crown(csdf, cm)
-    cprof = np.clip(0.74 * edge_profile + 0.26 * crown, 0.0, 1.0) * (cm > 0.01)
 
-    container_front = np.where(
-        cm > 0.01,
-        params.edge_height + (params.center_height - params.edge_height) * cprof,
-        0.0,
+    cprof_raw = np.clip(0.69 * edge_profile + 0.31 * crown, 0.0, 1.0)
+    cprof = (boundary_taper * cprof_raw * (cm > 0.01)).astype(np.float32)
+    container_front = (
+        boundary_taper
+        * (params.edge_height + (params.center_height - params.edge_height) * cprof_raw)
+        * (cm > 0.01)
     ).astype(np.float32)
 
-    # Back interface follows a wider, softer profile. Its varying separation
-    # from the front surface produces real thickness gradients instead of a
-    # fake second outline.
-    back_u = np.clip(positive_c / max(params.edge_width_px * 1.34, 1e-3), 0.0, 1.0)
-    back_edge_profile = smootherstep(back_u)
-    back_prof = np.clip(0.64 * back_edge_profile + 0.36 * crown, 0.0, 1.0) * (cm > 0.01)
-    base_thickness = params.back_depth + params.edge_thickness_gain * (1.0 - back_prof)
-    container_back = np.where(cm > 0.01, container_front - base_thickness, 0.0).astype(np.float32)
+    # Thickness is a real field. The exact silhouette tends to zero; a broad
+    # subsurface lobe supplies the optically thick curved lip; the clear core
+    # settles to `back_depth` instead of remaining maximally dense everywhere.
+    lip = _gaussian_lobe(edge_u, params.edge_thickness_peak, params.edge_thickness_width)
+    base_thickness = (
+        boundary_taper
+        * (params.back_depth + params.edge_thickness_gain * lip)
+        * (cm > 0.01)
+    ).astype(np.float32)
+    container_back = (container_front - base_thickness).astype(np.float32)
+    container_back = np.where(cm > 0.01, container_back, 0.0).astype(np.float32)
 
-    # Glyph is an independent secondary volume. The back-interface relief is
-    # negative because glyph_mass_gain > glyph_relief; this makes the mark a
-    # real lens/body rather than a bright emboss painted on the shell.
-    positive_g = np.maximum(gsdf, 0.0)
+    max_t = max(params.back_depth + params.edge_thickness_gain, 1e-6)
+    back_prof = np.clip(base_thickness / max_t, 0.0, 1.0).astype(np.float32)
+
+    # --------------------------------------------------------------- glyph lens
+    # The secondary dielectric receives the same continuity treatment. This is
+    # important at launcher scale: a hard relief cliff looks embossed/plastic;
+    # a tapered height/mass field reads as a small transparent optical insert.
+    positive_g = _effective_inside_distance(gsdf)
     gu = np.clip(positive_g / max(params.glyph_bevel_width_px, 1e-3), 0.0, 1.0)
     g_edge_profile = smootherstep(gu)
+    g_taper = smootherstep(
+        np.clip(positive_g / max(params.glyph_boundary_taper_px, 1e-3), 0.0, 1.0)
+    )
     g_crown = _interior_crown(gsdf, gm)
-    gprof = np.clip(0.72 * g_edge_profile + 0.28 * g_crown, 0.0, 1.0) * (gm > 0.01)
+    gprof_raw = np.clip(0.72 * g_edge_profile + 0.28 * g_crown, 0.0, 1.0)
+    gprof = (g_taper * gprof_raw * (gm > 0.01)).astype(np.float32)
 
-    gback_u = np.clip(positive_g / max(params.glyph_bevel_width_px * 1.28, 1e-3), 0.0, 1.0)
+    # Rear glyph mass is deliberately broader than the front relief, giving a
+    # thick optical insert without a bright flat fill.
+    gback_u = np.clip(positive_g / max(params.glyph_bevel_width_px * 1.34, 1e-3), 0.0, 1.0)
     gback_edge = smootherstep(gback_u)
-    gback_prof = np.clip(0.62 * gback_edge + 0.38 * g_crown, 0.0, 1.0) * (gm > 0.01)
+    gback_raw = np.clip(0.62 * gback_edge + 0.38 * g_crown, 0.0, 1.0)
+    gback_prof = (g_taper * gback_raw * (gm > 0.01)).astype(np.float32)
 
     glyph_relief_map = (params.glyph_relief * gprof).astype(np.float32)
     glyph_mass_map = (params.glyph_mass_gain * gback_prof).astype(np.float32)
 
-    front = container_front + glyph_relief_map
-    thickness = np.where(cm > 0.01, base_thickness, 0.0).astype(np.float32) + glyph_mass_map
+    front = (container_front + glyph_relief_map).astype(np.float32)
+    thickness = (base_thickness + glyph_mass_map).astype(np.float32)
     back = np.where(cm > 0.01, front - thickness, 0.0).astype(np.float32)
-    glyph_back_relief_map = (back - container_back) * gm
+    glyph_back_relief_map = ((back - container_back) * gm).astype(np.float32)
 
     front_normals = height_to_normals(front, params.normal_scale)
     back_normals = height_to_normals(back, params.normal_scale)
@@ -260,12 +295,12 @@ def build_surface_maps(
         glyph_mask=gm,
         container_sdf=csdf,
         glyph_sdf=gsdf,
-        container_profile=cprof.astype(np.float32),
-        container_back_profile=back_prof.astype(np.float32),
-        glyph_profile=gprof.astype(np.float32),
-        glyph_back_profile=gback_prof.astype(np.float32),
+        container_profile=cprof,
+        container_back_profile=back_prof,
+        glyph_profile=gprof,
+        glyph_back_profile=gback_prof,
         glyph_relief_map=glyph_relief_map,
-        glyph_back_relief_map=glyph_back_relief_map.astype(np.float32),
+        glyph_back_relief_map=glyph_back_relief_map,
         front_height=front,
         back_height=back,
         thickness=thickness,
