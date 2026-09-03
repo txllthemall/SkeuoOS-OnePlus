@@ -1,29 +1,38 @@
-name: Liquid Glass V3 Master
+name: Liquid Glass V3/V4 Master
 
 on:
   push:
     branches: [ v4.1-clear-glass ]
     paths:
       - 'tools/liquid_glass_v3/**'
+      - 'tools/liquid_glass_v4/**'
       - '.github/workflows/liquid-glass-v3.yml'
   workflow_dispatch:
 
 concurrency:
-  group: liquid-glass-v3-${{ github.ref }}
+  group: liquid-glass-master-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  v3-master:
+  master:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Install icon tooling
         run: python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
-      - name: Render V3 GitHub height-field master
+      - name: Render V3 baseline master
         run: python3 tools/liquid_glass_v3/render_master.py
+      - name: Render V4 analytic-volume master
+        run: python3 tools/liquid_glass_v4/render_master.py
       - name: Upload V3 diagnostics
         uses: actions/upload-artifact@v4
         with:
           name: SkeuoOS-Liquid-Glass-V3-Master
           path: build/liquid-glass-v3/**
+          if-no-files-found: error
+      - name: Upload V4 diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkeuoOS-Liquid-Glass-V4-Master
+          path: build/liquid-glass-v4/**
           if-no-files-found: error
