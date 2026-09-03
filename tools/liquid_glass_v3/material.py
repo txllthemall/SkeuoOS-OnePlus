@@ -11,22 +11,25 @@ from .surface import SurfaceMaps
 class MaterialParams:
     ior: float = 1.50
 
-    # V3.4 is transmission-first. Optical identity comes from paired signed
-    # interfaces and the real thickness field, not a broad milky alpha veil.
-    container_core_alpha: float = 0.010
-    container_mass_alpha: float = 0.018
-    container_edge_mass_alpha: float = 0.020
-    container_front_interface_alpha: float = 0.072
-    container_back_interface_alpha: float = 0.052
+    # Transmission-first shell, but strong enough to survive 64-96 px launchers.
+    # These are optical layer densities, not one global fill opacity.
+    container_core_alpha: float = 0.014
+    container_mass_alpha: float = 0.028
+    container_edge_mass_alpha: float = 0.030
+    container_front_interface_alpha: float = 0.105
+    container_back_interface_alpha: float = 0.074
 
-    glyph_core_alpha: float = 0.150
-    glyph_mass_alpha: float = 0.075
-    glyph_front_interface_alpha: float = 0.108
-    glyph_back_interface_alpha: float = 0.078
-    glyph_thin_boost: float = 0.040
+    # Glyph remains a denser second dielectric body. Run #19 proved that the
+    # first signed-interface bake was too faint; this restores optical mass
+    # without going back to the run-#18 milky white/gray emboss.
+    glyph_core_alpha: float = 0.240
+    glyph_mass_alpha: float = 0.110
+    glyph_front_interface_alpha: float = 0.165
+    glyph_back_interface_alpha: float = 0.118
+    glyph_thin_boost: float = 0.052
 
-    broad_environment_alpha: float = 0.014
-    specular_alpha: float = 0.030
+    broad_environment_alpha: float = 0.018
+    specular_alpha: float = 0.036
 
 
 @dataclass(frozen=True)
@@ -84,12 +87,7 @@ def _over_gray(
     layer_alpha: np.ndarray,
     gray: float | np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Composite one neutral optical layer into a premultiplied material.
-
-    Static Android glass has no backdrop sample. Encoding bright and dark
-    interfaces as separate premultiplied layers preserves both contrast
-    polarities without turning the entire shell into a gray/white card.
-    """
+    """Composite one neutral optical layer into a premultiplied material."""
     la = np.clip(layer_alpha.astype(np.float32), 0.0, 0.98)
     g = np.asarray(gray, dtype=np.float32)
     src = la[..., None] * g[..., None] if g.ndim == 2 else la[..., None] * float(g)
@@ -102,14 +100,11 @@ def bake_static_rgba(
     params: MaterialParams = MaterialParams(),
     flags: BakeFlags = BakeFlags(),
 ) -> np.ndarray:
-    """V3.4 wallpaper-independent static Liquid Glass surrogate.
+    """Wallpaper-independent static Liquid Glass surrogate.
 
-    The previous build proved the 2.5D volume but still looked foggy because a
-    large fraction of the broad curved shell shared one medium-bright RGB/alpha
-    field. This baker instead encodes the material as a clear transmission body
-    plus spatially separated FRONT/BACK light and dark optical interfaces. The
-    result is still a single neutral RGBA PNG, but it behaves much more like a
-    transparent dielectric when alpha-composited onto arbitrary wallpapers.
+    The material is encoded as a clear transmission body plus spatially
+    separated front/back light and dark optical interfaces. It stays neutral
+    RGB and requires no knowledge of the launcher wallpaper.
     """
     cm = np.clip(maps.container_mask, 0.0, 1.0)
     gm = np.clip(maps.glyph_mask, 0.0, 1.0)
@@ -124,8 +119,6 @@ def bake_static_rgba(
     gfs = _norm01(maps.glyph_slope)
     gbs = _norm01(maps.glyph_back_slope)
 
-    # Curved optical zones derived from geometry. These are broad slope fields,
-    # not hand-painted outlines.
     ce = np.clip((1.0 - cprof) * cm, 0.0, 1.0)
     cbe = np.clip((1.0 - cbprof) * cm, 0.0, 1.0)
     ge = np.clip((1.0 - gprof) * gm, 0.0, 1.0)
@@ -135,9 +128,6 @@ def bake_static_rgba(
     glyph_front_i = np.clip(0.86 * gfs + 0.14 * np.power(ge, 0.70), 0.0, 1.0)
     glyph_back_raw = np.clip(0.84 * gbs + 0.16 * np.power(gbe, 0.72), 0.0, 1.0)
 
-    # Move the rear interface inward along the real SDF normal. Separation is
-    # thickness-aware and visible after launcher downsampling, but much smaller
-    # than the old 5-16 px fake bevel pair.
     cnx, cny = _grad(maps.container_sdf)
     gnx, gny = _grad(maps.glyph_sdf)
     tvals = maps.thickness[cm > 0.5]
@@ -154,8 +144,6 @@ def bake_static_rgba(
     radius = np.clip(maps.local_radius / 24.0, 0.0, 1.0)
     thin = (1.0 - _smoothstep(3.0, 14.0, maps.local_radius)) * gm
 
-    # One coherent studio direction drives both front and back interface
-    # polarity. Rear cues intentionally invert the front response.
     lx, ly = -0.60, -0.80
     q = np.clip(nf[..., 0] * lx + nf[..., 1] * ly, -1.0, 1.0)
     bright = _smoothstep(0.015, 0.26, q)
@@ -166,91 +154,38 @@ def bake_static_rgba(
     premul = np.zeros((*cm.shape, 1), dtype=np.float32)
     alpha = np.zeros_like(cm, dtype=np.float32)
 
-    # Clear body. The neutral density is intentionally tiny; wallpaper hue must
-    # dominate the perceived colour of the production icon.
-    premul, alpha = _over_gray(premul, alpha, params.container_core_alpha * cm, 138.0)
-    premul, alpha = _over_gray(premul, alpha, params.container_mass_alpha * mass, 132.0)
-    premul, alpha = _over_gray(premul, alpha, params.container_edge_mass_alpha * edge_mass, 128.0)
+    # Clear shell body: low neutral density, with thickness concentrated near
+    # the continuous optical lip from `surface.py`.
+    premul, alpha = _over_gray(premul, alpha, params.container_core_alpha * cm, 140.0)
+    premul, alpha = _over_gray(premul, alpha, params.container_mass_alpha * mass, 134.0)
+    premul, alpha = _over_gray(premul, alpha, params.container_edge_mass_alpha * edge_mass, 130.0)
+    premul, alpha = _over_gray(premul, alpha, params.broad_environment_alpha * horizon * cm, 226.0)
 
-    # Broad environment-like catch exists even when specular is disabled. It is
-    # low-energy and geometry-derived so the no-specular gate still reads glass.
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.broad_environment_alpha * horizon * cm,
-        224.0,
-    )
+    # Rear interface then front interface. Opposite polarities coexist in one
+    # static asset, allowing the glass to survive both light and dark wallpapers.
+    premul, alpha = _over_gray(premul, alpha, params.container_back_interface_alpha * back_i * dark, 224.0)
+    premul, alpha = _over_gray(premul, alpha, params.container_back_interface_alpha * 0.88 * back_i * bright, 32.0)
+    premul, alpha = _over_gray(premul, alpha, params.container_front_interface_alpha * front_i * dark, 24.0)
+    premul, alpha = _over_gray(premul, alpha, params.container_front_interface_alpha * 0.96 * front_i * bright, 244.0)
 
-    # Rear interface first, then front interface. Bright/dark polarity is
-    # encoded simultaneously so a single static PNG survives both white and
-    # black wallpapers without runtime adaptation.
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.container_back_interface_alpha * back_i * dark,
-        222.0,
-    )
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.container_back_interface_alpha * 0.88 * back_i * bright,
-        34.0,
-    )
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.container_front_interface_alpha * front_i * dark,
-        28.0,
-    )
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.container_front_interface_alpha * 0.96 * front_i * bright,
-        242.0,
-    )
-
-    # Secondary volumetric glyph. Its body is denser than the shell, but still
-    # translucent; recognizability comes from mass + its own paired interfaces,
-    # not from a flat white SVG fill.
+    # Denser secondary glass glyph. The core is deliberately mid-light neutral,
+    # not opaque white; its paired surfaces provide most silhouette contrast.
     glyph_body = gm * (0.50 + 0.24 * gprof + 0.10 * (1.0 - radius))
     glyph_mass = gm * (0.22 + 0.78 * radius) * np.clip(0.36 * gprof + 0.64 * gbprof, 0.0, 1.0)
-    premul, alpha = _over_gray(premul, alpha, params.glyph_core_alpha * glyph_body, 156.0)
-    premul, alpha = _over_gray(premul, alpha, params.glyph_mass_alpha * glyph_mass, 148.0)
-    premul, alpha = _over_gray(premul, alpha, params.glyph_thin_boost * thin, 164.0)
+    premul, alpha = _over_gray(premul, alpha, params.glyph_core_alpha * glyph_body, 174.0)
+    premul, alpha = _over_gray(premul, alpha, params.glyph_mass_alpha * glyph_mass, 162.0)
+    premul, alpha = _over_gray(premul, alpha, params.glyph_thin_boost * thin, 180.0)
 
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.glyph_back_interface_alpha * glyph_back_i * dark,
-        229.0,
-    )
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.glyph_back_interface_alpha * 0.90 * glyph_back_i * bright,
-        29.0,
-    )
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.glyph_front_interface_alpha * glyph_front_i * dark,
-        24.0,
-    )
-    premul, alpha = _over_gray(
-        premul,
-        alpha,
-        params.glyph_front_interface_alpha * glyph_front_i * bright,
-        246.0,
-    )
+    premul, alpha = _over_gray(premul, alpha, params.glyph_back_interface_alpha * glyph_back_i * dark, 232.0)
+    premul, alpha = _over_gray(premul, alpha, params.glyph_back_interface_alpha * 0.90 * glyph_back_i * bright, 27.0)
+    premul, alpha = _over_gray(premul, alpha, params.glyph_front_interface_alpha * glyph_front_i * dark, 20.0)
+    premul, alpha = _over_gray(premul, alpha, params.glyph_front_interface_alpha * glyph_front_i * bright, 248.0)
 
     if flags.explicit_rim:
-        # Hairline is deliberately negligible. Disabling it should not alter the
-        # material class; it exists only to keep the exact launcher silhouette
-        # stable after aggressive downsampling.
         rim = _smoothstep(0.985, 0.9995, ce) * cm
         grim = _smoothstep(0.983, 0.9995, ge) * gm
-        premul, alpha = _over_gray(premul, alpha, 0.0025 * rim, 226.0)
-        premul, alpha = _over_gray(premul, alpha, 0.0030 * grim, 232.0)
+        premul, alpha = _over_gray(premul, alpha, 0.0025 * rim, 228.0)
+        premul, alpha = _over_gray(premul, alpha, 0.0030 * grim, 234.0)
 
     if flags.specular:
         light = np.array([-0.45, -0.72, 0.53], dtype=np.float32)
@@ -267,14 +202,14 @@ def bake_static_rgba(
         sp = np.power(ndoth, 52.0) * (0.10 + 0.90 * fresnel) * surface
         premul, alpha = _over_gray(premul, alpha, params.specular_alpha * sp, 255.0)
 
-    # No external drop shadow: depth must survive the no-shadow gate unchanged.
-    alpha = np.clip(alpha, 0.0, 0.72)
+    # No external drop shadow: `shadow` intentionally has no effect.
+    alpha = np.clip(alpha, 0.0, 0.74)
     rgb = np.divide(
         premul[..., 0],
         np.maximum(alpha, 1e-6),
         out=np.full_like(alpha, 128.0),
         where=alpha > 1e-6,
     )
-    rgb = np.where(cm > 1e-4, np.clip(rgb, 10.0, 248.0), 128.0)
+    rgb = np.where(cm > 1e-4, np.clip(rgb, 10.0, 250.0), 128.0)
     rgba = np.stack((rgb, rgb, rgb, alpha * 255.0), axis=-1)
     return np.clip(rgba, 0.0, 255.0).astype(np.uint8)
