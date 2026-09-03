@@ -5,13 +5,13 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageChops
+from PIL import Image
 
 TOOLS = Path(__file__).resolve().parents[1]
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-from generate_liquid27 import render, _foreground_mask
+from generate_liquid27 import render
 from liquid27.catalog import ICON_SPECS
 from liquid_glass_v3.diagnostics import (
     composite_center,
@@ -26,7 +26,8 @@ from liquid_glass_v3.diagnostics import (
 )
 from liquid_glass_v3.material import BakeFlags, MaterialParams, bake_static_rgba
 from liquid_glass_v3.preview_optics import render_optical_preview
-from liquid_glass_v3.static_android import bake_android_rgba, launcher_scale_suite
+from liquid_glass_v3.sources import github_octocat_mask
+from liquid_glass_v3.static_android import launcher_scale_suite
 from liquid_glass_v3.surface import SurfaceParams, build_surface_maps, squircle_mask
 
 OUT = Path(__file__).resolve().parents[2] / "build" / "liquid-glass-v3"
@@ -34,14 +35,17 @@ SIZE = 640
 
 
 def old_github() -> Image.Image:
+    """Legacy render exists only for A/B; it is never material input to V3."""
     bg, kind, _ = ICON_SPECS["skeuo_github"]
     return render("skeuo_github", bg, kind, "clear").convert("RGBA")
 
 
 def glyph_mask(size: int = SIZE) -> Image.Image:
-    m = _foreground_mask("skeuo_github").convert("L")
-    # Keep the existing SkeuoOS geometry exactly; only scale for the V3 master.
-    return m.resize((size, size), Image.Resampling.LANCZOS)
+    # Do NOT use legacy foreground-union semantics here. The legacy GitHub mark
+    # is the light field around a negative-space cat, so unioning it makes the
+    # ring the glyph. V3 uses the actual Octocat body derived from the official
+    # 2026 Primer Octicon geometry.
+    return github_octocat_mask(size)
 
 
 def build_variant(*, specular=True, shadow=True, rim=True):
@@ -82,10 +86,8 @@ def main() -> None:
     noshadow, _ = build_variant(shadow=False)
     norim, _ = build_variant(rim=False)
 
-    # Production asset itself.
     new.save(OUT / "github_v3_rgba.png")
 
-    # P0 static master board: same RGBA on six unrelated wallpapers, no labels.
     make_material_lab(new).save(OUT / "preview_v3_master.png")
     for kind in ("dark", "bright", "midtone", "warm", "blue"):
         composite_center(wallpaper(kind, (900, 900)), new, 390).save(OUT / f"preview_v3_master_{kind}.png")
@@ -97,7 +99,6 @@ def main() -> None:
     composite_center(wallpaper("midtone", (900, 900)), noshadow, 390).save(OUT / "preview_v3_no_shadow.png")
     composite_center(wallpaper("midtone", (900, 900)), norim, 390).save(OUT / "preview_v3_no_rim.png")
 
-    # Geometry-first diagnostics.
     render_map_sheet(maps).save(OUT / "preview_v3_maps.png")
     map_to_gray(maps.front_height).save(OUT / "preview_v3_height.png")
     normal_map_image(maps.normals).save(OUT / "preview_v3_normals.png")
@@ -107,20 +108,18 @@ def main() -> None:
     map_to_gray(maps.glyph_profile).save(OUT / "preview_v3_glyph_relief.png")
     alpha_only(new).save(OUT / "preview_v3_alpha_only.png")
 
-    # Honest baseline comparison: no optical preview tricks.
     side_by_side(old, new).save(OUT / "preview_v3_old_vs_new.png")
     difference_heatmap(old, new, wallpaper("midtone", (900, 900))).save(OUT / "preview_v3_difference_heatmap.png")
 
-    # Preview-only actual refraction path, using the exact same V3 geometry maps.
     checker = wallpaper("highcontrast", (SIZE, SIZE))
-    optical_checker = render_optical_preview(maps, checker, displacement_scale=28.0)
-    optical_checker.save(OUT / "preview_v3_checker_refraction.png")
+    render_optical_preview(maps, checker, displacement_scale=28.0).save(OUT / "preview_v3_checker_refraction.png")
     render_optical_preview(maps, wallpaper("midtone", (SIZE, SIZE)), displacement_scale=25.0).save(OUT / "preview_v3_optical_stress.png")
 
     data = diagnostics_dict(new, maps)
     data.update({
         "renderer": "liquid_glass_v3_height_field",
         "size": SIZE,
+        "glyph_source": "primer/octicons mark-github-24 2026 negative-space Octocat",
         "legacy_used_for_material": False,
         "production_background_sampling": False,
     })
