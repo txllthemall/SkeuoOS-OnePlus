@@ -1,4 +1,4 @@
-name: Liquid Glass V3/V4 Master
+name: Liquid Glass V3/V4/V5 Master
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
     paths:
       - 'tools/liquid_glass_v3/**'
       - 'tools/liquid_glass_v4/**'
+      - 'tools/liquid_glass_v5/**'
       - '.github/workflows/liquid-glass-v3.yml'
   workflow_dispatch:
 
@@ -24,6 +25,8 @@ jobs:
         run: python3 tools/liquid_glass_v3/render_master.py
       - name: Render V4 analytic-volume master
         run: python3 tools/liquid_glass_v4/render_master.py
+      - name: Render V5 transport-derived master
+        run: python3 tools/liquid_glass_v5/render_master.py
       - name: Upload V3 diagnostics
         uses: actions/upload-artifact@v4
         with:
@@ -35,4 +38,10 @@ jobs:
         with:
           name: SkeuoOS-Liquid-Glass-V4-Master
           path: build/liquid-glass-v4/**
+          if-no-files-found: error
+      - name: Upload V5 diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkeuoOS-Liquid-Glass-V5-Master
+          path: build/liquid-glass-v5/**
           if-no-files-found: error
