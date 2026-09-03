@@ -101,27 +101,32 @@ def main() -> None:
 
     render_map_sheet(maps).save(OUT / "preview_v3_maps.png")
     map_to_gray(maps.front_height).save(OUT / "preview_v3_height.png")
-    normal_map_image(maps.normals).save(OUT / "preview_v3_normals.png")
+    map_to_gray(maps.back_height).save(OUT / "preview_v3_back_height.png")
+    normal_map_image(maps.front_normals).save(OUT / "preview_v3_normals.png")
+    normal_map_image(maps.back_normals).save(OUT / "preview_v3_back_normals.png")
     map_to_gray(maps.thickness).save(OUT / "preview_v3_thickness.png")
     map_to_gray(maps.curvature).save(OUT / "preview_v3_curvature.png")
+    map_to_gray(maps.back_curvature).save(OUT / "preview_v3_back_curvature.png")
     map_to_gray(maps.local_radius).save(OUT / "preview_v3_local_radius.png")
     map_to_gray(maps.glyph_profile).save(OUT / "preview_v3_glyph_relief.png")
+    map_to_gray(maps.glyph_back_relief_map).save(OUT / "preview_v3_glyph_back_relief.png")
     alpha_only(new).save(OUT / "preview_v3_alpha_only.png")
 
     side_by_side(old, new).save(OUT / "preview_v3_old_vs_new.png")
     difference_heatmap(old, new, wallpaper("midtone", (900, 900))).save(OUT / "preview_v3_difference_heatmap.png")
 
     checker = wallpaper("highcontrast", (SIZE, SIZE))
-    render_optical_preview(maps, checker, displacement_scale=28.0).save(OUT / "preview_v3_checker_refraction.png")
-    render_optical_preview(maps, wallpaper("midtone", (SIZE, SIZE)), displacement_scale=25.0).save(OUT / "preview_v3_optical_stress.png")
+    render_optical_preview(maps, checker, displacement_scale=34.0).save(OUT / "preview_v3_checker_refraction.png")
+    render_optical_preview(maps, wallpaper("midtone", (SIZE, SIZE)), displacement_scale=30.0).save(OUT / "preview_v3_optical_stress.png")
 
     data = diagnostics_dict(new, maps)
     data.update({
-        "renderer": "liquid_glass_v3_height_field",
+        "renderer": "liquid_glass_v3_height_field_two_interface",
         "size": SIZE,
         "glyph_source": "primer/octicons mark-github-24 2026 negative-space Octocat",
         "legacy_used_for_material": False,
         "production_background_sampling": False,
+        "front_back_interfaces": True,
     })
     save_diagnostics_json(OUT / "v3_diagnostics.json", data)
 
