@@ -17,14 +17,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--glyph-json", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--bg", choices=("black", "white", "gray", "midtone", "checker"), required=True)
+    p.add_argument("--container", choices=("on", "off"), default="on")
+    p.add_argument("--glyph", choices=("on", "off"), default="on")
+    p.add_argument("--studio", choices=("on", "off"), default="on")
     return p.parse_args(argv)
 
 
 def reset_scene() -> None:
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
-    for datablocks in (bpy.data.curves, bpy.data.meshes, bpy.data.materials, bpy.data.cameras, bpy.data.lights):
-        pass
 
 
 def point_at(obj, target=(0.0, 0.0, 0.0)) -> None:
@@ -38,6 +39,7 @@ def make_glass(name: str, *, ior: float, roughness: float, absorption_density: f
     nt = mat.node_tree
     nt.nodes.clear()
     out = nt.nodes.new("ShaderNodeOutputMaterial")
+
     glass = nt.nodes.new("ShaderNodeBsdfGlass")
     glass.inputs["Color"].default_value = (transmission_luma, transmission_luma, transmission_luma, 1.0)
     glass.inputs["Roughness"].default_value = roughness
@@ -45,7 +47,7 @@ def make_glass(name: str, *, ior: float, roughness: float, absorption_density: f
     nt.links.new(glass.outputs["BSDF"], out.inputs["Surface"])
 
     volume = nt.nodes.new("ShaderNodeVolumeAbsorption")
-    volume.inputs["Color"].default_value = (0.74, 0.74, 0.74, 1.0)
+    volume.inputs["Color"].default_value = (0.72, 0.72, 0.72, 1.0)
     volume.inputs["Density"].default_value = absorption_density
     nt.links.new(volume.outputs["Volume"], out.inputs["Volume"])
     return mat
@@ -67,12 +69,11 @@ def make_filled_curve(name: str, points, *, extrude: float, bevel: float, bevel_
     curve = bpy.data.curves.new(name=name, type="CURVE")
     curve.dimensions = "2D"
     curve.fill_mode = "BOTH"
-    curve.resolution_u = 1
-    curve.render_resolution_u = 1
     curve.extrude = extrude
     curve.bevel_depth = bevel
     curve.bevel_resolution = bevel_resolution
     curve.resolution_u = 2
+    curve.render_resolution_u = 2
 
     spline = curve.splines.new("POLY")
     spline.points.add(len(points) - 1)
@@ -117,9 +118,8 @@ def make_background(kind: str):
     nt.links.new(emission.outputs["Emission"], out.inputs["Surface"])
     plane.data.materials.append(mat)
 
-    # The backdrop is an exact camera/transmission target, not part of the
-    # environment lighting. Reflections remain identical for black/white/gray,
-    # which makes inverse compositing mathematically meaningful.
+    # Exact camera/transmission target. It must not become part of the studio
+    # environment, otherwise black/white inverse solving would be contaminated.
     for attr, value in (
         ("visible_camera", True),
         ("visible_transmission", True),
@@ -145,88 +145,91 @@ def add_area(name: str, location, energy: float, size: float):
     return obj
 
 
-def main() -> None:
-    args = parse_args()
-    reset_scene()
-
-    scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE"
-    if hasattr(scene, "eevee"):
-        scene.eevee.taa_render_samples = 96
-        scene.eevee.use_gtao = True
-        scene.eevee.gtao_distance = 3.0
-        scene.eevee.gtao_factor = 0.65
-        scene.eevee.use_soft_shadows = True
-        if hasattr(scene.eevee, "use_ssr"):
-            scene.eevee.use_ssr = True
-        if hasattr(scene.eevee, "use_ssr_refraction"):
-            scene.eevee.use_ssr_refraction = True
+def configure_render(scene) -> None:
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 36
+    scene.cycles.use_denoising = True
+    scene.cycles.max_bounces = 8
+    scene.cycles.transmission_bounces = 8
+    scene.cycles.transparent_max_bounces = 8
+    scene.cycles.glossy_bounces = 5
+    scene.cycles.diffuse_bounces = 2
 
     scene.render.resolution_x = 640
     scene.render.resolution_y = 640
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
-    scene.render.image_settings.color_depth = "16"
+    scene.render.image_settings.color_depth = "8"
     scene.view_settings.view_transform = "Standard"
-    scene.view_settings.look = "Medium High Contrast"
+    try:
+        scene.view_settings.look = "None"
+    except Exception:
+        pass
     scene.view_settings.exposure = 0.0
     scene.view_settings.gamma = 1.0
+
+
+def main() -> None:
+    args = parse_args()
+    reset_scene()
+
+    scene = bpy.context.scene
+    configure_render(scene)
 
     world = scene.world
     world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     bg.inputs["Color"].default_value = (0.018, 0.018, 0.018, 1.0)
-    bg.inputs["Strength"].default_value = 0.34
+    bg.inputs["Strength"].default_value = 0.34 if args.studio == "on" else 0.065
 
     container_mat = make_glass(
         "ContainerGlass",
         ior=1.48,
-        roughness=0.055,
-        absorption_density=0.045,
-        transmission_luma=0.985,
+        roughness=0.050,
+        absorption_density=0.038,
+        transmission_luma=0.992,
     )
     glyph_mat = make_glass(
         "GlyphGlass",
         ior=1.52,
-        roughness=0.040,
-        absorption_density=0.36,
-        transmission_luma=0.93,
+        roughness=0.035,
+        absorption_density=0.34,
+        transmission_luma=0.945,
     )
 
-    container = make_filled_curve(
-        "Container",
-        superellipse_points(),
-        extrude=0.145,
-        bevel=0.155,
-        bevel_resolution=8,
-        z=0.0,
-        material=container_mat,
-    )
-    if hasattr(container.data.materials[0], "use_screen_refraction"):
-        container.data.materials[0].use_screen_refraction = True
+    if args.container == "on":
+        make_filled_curve(
+            "Container",
+            superellipse_points(),
+            extrude=0.150,
+            bevel=0.160,
+            bevel_resolution=9,
+            z=0.0,
+            material=container_mat,
+        )
 
-    payload = json.loads(Path(args.glyph_json).read_text(encoding="utf-8"))
-    glyph_pts = [(p[0] * 1.055, p[1] * 1.055) for p in payload["points"]]
-    glyph = make_filled_curve(
-        "Glyph",
-        glyph_pts,
-        extrude=0.070,
-        bevel=0.050,
-        bevel_resolution=6,
-        z=0.275,
-        material=glyph_mat,
-    )
-    if hasattr(glyph.data.materials[0], "use_screen_refraction"):
-        glyph.data.materials[0].use_screen_refraction = True
+    if args.glyph == "on":
+        payload = json.loads(Path(args.glyph_json).read_text(encoding="utf-8"))
+        glyph_pts = [(p[0] * 1.055, p[1] * 1.055) for p in payload["points"]]
+        make_filled_curve(
+            "Glyph",
+            glyph_pts,
+            extrude=0.072,
+            bevel=0.052,
+            bevel_resolution=7,
+            z=0.278 if args.container == "on" else 0.0,
+            material=glyph_mat,
+        )
 
     make_background(args.bg)
 
-    # Large asymmetric studio sources. They define material curvature without a
-    # painted highlight streak and stay constant across all inverse-bake passes.
-    add_area("Key", (-3.5, -4.2, 5.6), 920.0, 4.4)
-    add_area("Fill", (3.8, -1.8, 4.8), 430.0, 3.0)
-    add_area("Top", (0.2, 4.4, 4.0), 250.0, 2.7)
+    if args.studio == "on":
+        # Large asymmetric studio sources. These are actual scene lights, not a
+        # painted streak in the RGBA asset.
+        add_area("Key", (-3.5, -4.2, 5.6), 920.0, 4.4)
+        add_area("Fill", (3.8, -1.8, 4.8), 430.0, 3.0)
+        add_area("Top", (0.2, 4.4, 4.0), 250.0, 2.7)
 
     cam_data = bpy.data.cameras.new("Camera")
     cam = bpy.data.objects.new("Camera", cam_data)
@@ -234,7 +237,6 @@ def main() -> None:
     cam.location = (0.0, 0.0, 5.6)
     cam.data.type = "ORTHO"
     cam.data.ortho_scale = 4.05
-    cam.data.lens = 50
     point_at(cam)
     scene.camera = cam
 
