@@ -144,7 +144,7 @@ def _dot_ramp(nt, normal_socket, direction, dark: float, mid: float, bright: flo
     dot = nt.nodes.new("ShaderNodeVectorMath")
     dot.name = f"{name}Dot"
     dot.operation = "DOT_PRODUCT"
-    dot.inputs[1].default_value = (*direction, 0.0)
+    dot.inputs[1].default_value = direction
     nt.links.new(normal_socket, dot.inputs[0])
 
     remap = nt.nodes.new("ShaderNodeMapRange")
