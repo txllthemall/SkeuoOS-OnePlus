@@ -30,7 +30,7 @@ def _normalize(v: np.ndarray) -> np.ndarray:
 
 
 def _refract(i: np.ndarray, n: np.ndarray, eta: float) -> np.ndarray:
-    """Vectorized GLSL-style refract(I, N, eta), used for front entry only."""
+    """Vectorized GLSL-style refract(I, N, eta)."""
     dotni = np.sum(n * i, axis=-1, keepdims=True)
     k = 1.0 - eta * eta * (1.0 - dotni * dotni)
     root = np.sqrt(np.maximum(k, 0.0))
@@ -41,49 +41,88 @@ def _refract(i: np.ndarray, n: np.ndarray, eta: float) -> np.ndarray:
     return _normalize(t).astype(np.float32)
 
 
-def _two_interface_flow(
-    front_normals: np.ndarray,
-    back_normals: np.ndarray,
-    thickness: np.ndarray,
-    ior: float,
-    scale: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Stable paired-interface optical flow for the preview renderer.
+def _blur5(a: np.ndarray, passes: int = 1) -> np.ndarray:
+    """Low-pass an optical FLOW field, never the wallpaper itself.
 
-    We use Snell refraction for AIR->GLASS entry, then use the difference
-    between front/back interface orientation as a bounded exit correction.
-    This keeps the physically meaningful cause/effect (normals + thickness)
-    while avoiding near-grazing singularities that produced noisy TIR-like
-    speckle in the first paired-interface experiment.
+    Height-field derivatives can contain one-pixel spikes at rasterized edges.
+    Integrating the vector field over a small pixel footprint removes those
+    spikes without creating a fake frosted-glass blur.
     """
-    h, w = thickness.shape
+    out = a.astype(np.float32)
+    weights = np.asarray([1.0, 4.0, 6.0, 4.0, 1.0], dtype=np.float32) / 16.0
+    for _ in range(max(int(passes), 0)):
+        p = np.pad(out, ((0, 0), (2, 2)), mode="edge")
+        out = sum(weights[j] * p[:, j : j + out.shape[1]] for j in range(5))
+        p = np.pad(out, ((2, 2), (0, 0)), mode="edge")
+        out = sum(weights[j] * p[j : j + out.shape[0], :] for j in range(5))
+    return out.astype(np.float32)
+
+
+def _soft_cap(v: np.ndarray, limit: float) -> np.ndarray:
+    limit = max(float(limit), 1e-5)
+    return (limit * np.tanh(v / limit)).astype(np.float32)
+
+
+def _two_interface_flow(
+    maps: SurfaceMaps,
+    ior: float,
+    *,
+    displacement_scale: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Paired front/back-interface optical flow.
+
+    Run #10 still tore checker lines because the back surface was treated as a
+    large differential correction after a single entry refraction. Here the
+    ray actually enters through the FRONT interface, traverses measured glass
+    thickness, and is evaluated against the BACK interface before the final UV
+    sample. The resulting field is footprint-filtered and softly saturated.
+    """
+    h, w = maps.thickness.shape
     incident = np.zeros((h, w, 3), dtype=np.float32)
     incident[..., 2] = -1.0
 
-    inside = _refract(incident, front_normals, 1.0 / max(ior, 1.0001))
-    travel = thickness / np.maximum(-inside[..., 2], 0.34)
-    dx_inside = inside[..., 0] * travel
-    dy_inside = inside[..., 1] * travel
+    nf = maps.front_normals.astype(np.float32)
+    nb_out = -maps.back_normals.astype(np.float32)
 
-    # Back interface contributes a bounded differential-lens term. This is
-    # spatially distinct from the front surface because its height field is
-    # generated from the variable-thickness back profile.
-    dnx = front_normals[..., 0] - back_normals[..., 0]
-    dny = front_normals[..., 1] - back_normals[..., 1]
-    exit_gain = 0.62 * thickness
-    dx_exit = dnx * exit_gain
-    dy_exit = dny * exit_gain
+    inside = _refract(incident, nf, 1.0 / max(float(ior), 1.0001))
+    inside_z = np.maximum(-inside[..., 2], 0.22)
+    travel = np.clip(maps.thickness, 0.0, None) / inside_z
 
-    dx = (dx_inside + dx_exit) * scale
-    dy = (dy_inside + dy_exit) * scale
+    size_gain = float(min(h, w)) / 640.0
+    internal_gain = 23.0 * size_gain * float(displacement_scale)
+    dx = inside[..., 0] * travel * internal_gain
+    dy = inside[..., 1] * travel * internal_gain
 
-    # Hard visual-safety clamp. This is not an artistic rim; it merely prevents
-    # pathological UV jumps when a sampled silhouette contains a near-vertical
-    # one-pixel slope after rasterization.
-    limit = max(10.0, 0.055 * float(min(h, w)))
-    mag = np.sqrt(dx * dx + dy * dy)
-    gain = np.minimum(1.0, limit / np.maximum(mag, 1e-6))
-    return (dx * gain).astype(np.float32), (dy * gain).astype(np.float32)
+    # Refract out through the independently shaped rear interface. Because the
+    # backdrop in this preview is conceptually close to the glass, the exit ray
+    # contributes only a short extra path instead of a second huge warp.
+    outgoing = _refract(inside, nb_out, max(float(ior), 1.0001))
+    out_z = np.maximum(-outgoing[..., 2], 0.28)
+    exit_gap = np.clip(maps.thickness, 0.0, None) * 4.0 * size_gain * float(displacement_scale)
+    dx += outgoing[..., 0] / out_z * exit_gap
+    dy += outgoing[..., 1] / out_z * exit_gap
+
+    # Secondary glass glyph: add its own smooth relief-gradient lens instead of
+    # multiplying the entire container displacement inside the glyph.
+    gy, gx = np.gradient(maps.glyph_relief_map.astype(np.float32))
+    glyph_volume = np.clip(maps.glyph_mask * (0.32 + 0.68 * maps.glyph_profile), 0.0, 1.0)
+    dx += -gx * glyph_volume * (19.0 * size_gain)
+    dy += -gy * glyph_volume * (19.0 * size_gain)
+
+    # Integrate the vector field over a small footprint before sampling.
+    dx = _blur5(dx, passes=2)
+    dy = _blur5(dy, passes=2)
+
+    # Soft saturation preserves direction/order and prevents the run-#10
+    # fun-house-mirror spikes without introducing a hard clipped contour.
+    max_disp = 13.5 * size_gain * max(float(displacement_scale), 0.45)
+    dx = _soft_cap(dx, max_disp)
+    dy = _soft_cap(dy, max_disp)
+
+    gate = np.clip(maps.container_mask, 0.0, 1.0)
+    dx *= gate
+    dy *= gate
+    return dx.astype(np.float32), dy.astype(np.float32)
 
 
 def render_optical_preview(
@@ -91,7 +130,7 @@ def render_optical_preview(
     wallpaper: Image.Image,
     *,
     params: MaterialParams = MaterialParams(),
-    displacement_scale: float = 30.0,
+    displacement_scale: float = 1.0,
     specular: bool = True,
 ) -> Image.Image:
     """Wallpaper-aware V3 optical preview. Never used for production PNG."""
@@ -99,43 +138,39 @@ def render_optical_preview(
     bg = wallpaper.convert("RGB").resize((size, size), Image.Resampling.LANCZOS)
     arr = np.asarray(bg, dtype=np.float32)
 
-    dx, dy = _two_interface_flow(
-        maps.front_normals,
-        maps.back_normals,
-        maps.thickness,
-        params.ior,
-        displacement_scale,
-    )
-
+    dx, dy = _two_interface_flow(maps, params.ior, displacement_scale=displacement_scale)
     primary = _bilinear_sample(arr, dx, dy)
 
-    front_s = maps.front_slope
-    back_s = maps.back_slope
-    fs = front_s / max(float(np.percentile(front_s, 99.5)), 1e-6)
-    bs = back_s / max(float(np.percentile(back_s, 99.5)), 1e-6)
-    edge = np.clip(0.62 * fs + 0.38 * bs, 0.0, 1.0)[..., None]
-
-    # Small optical integration near curved zones. The center remains a single
-    # crisp sample; only high-slope areas blend secondary rays.
-    secondary = _bilinear_sample(arr, dx * 0.90 - dy * 0.045, dy * 0.90 + dx * 0.045)
-    glass = primary * (1.0 - 0.14 * edge) + secondary * (0.14 * edge)
-
-    # Weak caustic-like luminance redistribution from flow divergence.
-    ddx_dx = np.gradient(dx, axis=1)
-    ddy_dy = np.gradient(dy, axis=0)
-    compression = np.clip(-(ddx_dx + ddy_dy) * 0.030, -0.045, 0.060)
-    glass *= 1.0 + compression[..., None]
+    # Tiny finite-footprint integration only where the actual front/back
+    # surfaces are steep. The clear center stays a single crisp sample.
+    surface = maps.front_slope + 0.60 * maps.back_slope
+    active = maps.container_mask > 0.2
+    s_hi = max(float(np.percentile(surface[active], 99.0)) if np.any(active) else 1.0, 1e-6)
+    edge = np.clip(surface / s_hi, 0.0, 1.0)[..., None]
+    secondary = _bilinear_sample(arr, dx * 0.95 - dy * 0.030, dy * 0.95 + dx * 0.030)
+    glass = primary * (1.0 - 0.075 * edge) + secondary * (0.075 * edge)
 
     nf = maps.front_normals
     nb = maps.back_normals
-    ndotv = np.clip(nf[..., 2], 0.0, 1.0)
-    fresnel = schlick_fresnel(ndotv, params.ior)
+    ff = schlick_fresnel(np.clip(nf[..., 2], 0.0, 1.0), params.ior)
+    fb = schlick_fresnel(np.clip(nb[..., 2], 0.0, 1.0), params.ior)
+    fresnel = np.clip(0.72 * ff + 0.28 * fb, 0.0, 1.0)
 
-    env_front = _bilinear_sample(arr, -dx * 0.18 + 4.0 * nf[..., 0], -dy * 0.18 + 4.0 * nf[..., 1])
-    env_back = _bilinear_sample(arr, dx * 0.08 - 2.5 * nb[..., 0], dy * 0.08 - 2.5 * nb[..., 1])
-    env = 0.72 * env_front + 0.28 * env_back
-    env_w = np.clip((0.045 + 0.24 * fresnel) * maps.container_mask, 0.0, 0.19)[..., None]
+    # Environment colour comes only from nearby wallpaper samples.
+    env_front = _bilinear_sample(arr, -0.16 * dx + 3.0 * nf[..., 0], -0.16 * dy + 3.0 * nf[..., 1])
+    env_back = _bilinear_sample(arr, 0.06 * dx - 1.8 * nb[..., 0], 0.06 * dy - 1.8 * nb[..., 1])
+    env = 0.78 * env_front + 0.22 * env_back
+    env_w = np.clip((0.020 + 0.15 * fresnel) * maps.container_mask, 0.0, 0.14)[..., None]
     glass = glass * (1.0 - env_w) + env * env_w
+
+    # Very small caustic-like energy redistribution from the FILTERED flow.
+    # This is intentionally two orders gentler than the first V3 experiment.
+    sdx = _blur5(dx, 1)
+    sdy = _blur5(dy, 1)
+    divergence = np.gradient(sdx, axis=1) + np.gradient(sdy, axis=0)
+    compression = _blur5(-divergence, 1)
+    compression = np.clip(compression * 0.012, -0.018, 0.024)
+    glass *= 1.0 + compression[..., None]
 
     if specular:
         light = np.array([-0.42, -0.74, 0.52], dtype=np.float32)
@@ -144,17 +179,15 @@ def render_optical_preview(
         halfv = light + view
         halfv /= max(float(np.linalg.norm(halfv)), 1e-6)
         ndoth = np.clip(nf[..., 0] * halfv[0] + nf[..., 1] * halfv[1] + nf[..., 2] * halfv[2], 0.0, 1.0)
-        sp = np.power(ndoth, 40.0) * (0.16 + 0.84 * fresnel)
-        sp *= np.clip(maps.container_mask + 0.56 * maps.glyph_mask, 0.0, 1.0)
-        glass = glass * (1.0 - 0.11 * sp[..., None]) + 255.0 * (0.11 * sp[..., None])
+        slope = maps.front_slope + 0.45 * maps.glyph_slope
+        slope_hi = max(float(np.percentile(slope[active], 99.0)) if np.any(active) else 1.0, 1e-6)
+        slope = np.clip(slope / slope_hi, 0.0, 1.0)
+        sp = np.power(ndoth, 44.0) * (0.09 + 0.91 * fresnel) * slope
+        sp *= np.clip(maps.container_mask + 0.30 * maps.glyph_mask, 0.0, 1.0)
+        glass = glass * (1.0 - 0.085 * sp[..., None]) + 255.0 * (0.085 * sp[..., None])
 
-    core = np.clip(maps.container_profile * maps.container_mask, 0.0, 1.0)[..., None]
-    glyph_volume = np.clip(0.45 * maps.glyph_profile + 0.55 * maps.glyph_back_profile, 0.0, 1.0)[..., None]
-    effect = np.clip(
-        (1.0 - 0.74 * core) * maps.container_mask[..., None]
-        + 0.30 * glyph_volume,
-        0.0,
-        1.0,
-    )
+    # Inside the object the refracted sample is authoritative. In the flat core
+    # the computed flow approaches zero, so wallpaper detail remains intact.
+    effect = np.clip(maps.container_mask[..., None], 0.0, 1.0)
     out = arr * (1.0 - effect) + glass * effect
     return Image.fromarray(np.clip(out, 0.0, 255.0).astype(np.uint8), "RGB")
