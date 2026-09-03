@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Tuple
 
 import numpy as np
@@ -12,15 +11,15 @@ FloatMap = np.ndarray
 
 @dataclass(frozen=True)
 class SurfaceParams:
-    edge_width_px: float = 78.0
-    center_height: float = 1.00
-    edge_height: float = 0.12
-    back_depth: float = 0.34
-    edge_thickness_gain: float = 0.32
-    glyph_relief: float = 0.44
-    glyph_mass_gain: float = 0.34
-    glyph_bevel_width_px: float = 26.0
-    normal_scale: float = 2.8
+    edge_width_px: float = 56.0
+    center_height: float = 0.90
+    edge_height: float = 0.18
+    back_depth: float = 0.28
+    edge_thickness_gain: float = 0.20
+    glyph_relief: float = 0.24
+    glyph_mass_gain: float = 0.22
+    glyph_bevel_width_px: float = 15.0
+    normal_scale: float = 2.45
 
 
 @dataclass
@@ -31,11 +30,14 @@ class SurfaceMaps:
     glyph_sdf: FloatMap
     container_profile: FloatMap
     glyph_profile: FloatMap
+    glyph_relief_map: FloatMap
     front_height: FloatMap
     back_height: FloatMap
     thickness: FloatMap
     normals: FloatMap
     slope: FloatMap
+    container_slope: FloatMap
+    glyph_slope: FloatMap
     curvature: FloatMap
     local_radius: FloatMap
 
@@ -128,6 +130,11 @@ def height_to_normals(height: FloatMap, z_scale: float) -> FloatMap:
     return (n / np.maximum(length, 1e-8)).astype(np.float32)
 
 
+def _slope(a: FloatMap) -> FloatMap:
+    gx, gy = _central_gradient(a)
+    return np.sqrt(gx * gx + gy * gy).astype(np.float32)
+
+
 def _curvature(height: FloatMap) -> FloatMap:
     gx, gy = _central_gradient(height)
     gxx, _ = _central_gradient(gx)
@@ -155,30 +162,34 @@ def build_surface_maps(
     csdf = signed_distance(cm)
     gsdf = signed_distance(gm)
 
-    # Broad physical edge zone. 1 in flat core, 0 at boundary.
+    # Broad physical container edge. 1 in clear core, 0 at boundary.
     cu = np.clip(csdf / max(params.edge_width_px, 1e-3), 0.0, 1.0)
     cprof = smootherstep(cu) * (cm > 0.01)
 
-    # Glyph is an actual raised secondary surface, not a composited overlay.
-    gu = np.clip(gsdf / max(params.glyph_bevel_width_px, 1e-3), 0.0, 1.0)
-    gprof = smootherstep(gu) * (gm > 0.01)
-
-    front = np.where(
+    container_front = np.where(
         cm > 0.01,
         params.edge_height + (params.center_height - params.edge_height) * cprof,
         0.0,
     ).astype(np.float32)
-    front += (params.glyph_relief * gprof).astype(np.float32)
 
-    # Separate thickness field: broad edge thickening + glyph mass.
+    # Glyph is an independent secondary relief. Its slope is kept separate so
+    # the glyph cannot accidentally turn into a giant container halo.
+    gu = np.clip(gsdf / max(params.glyph_bevel_width_px, 1e-3), 0.0, 1.0)
+    gprof = smootherstep(gu) * (gm > 0.01)
+    glyph_relief_map = (params.glyph_relief * gprof).astype(np.float32)
+
+    front = container_front + glyph_relief_map
+
+    # Separate thickness field: broad edge thickening + glyph optical mass.
     base_t = params.back_depth + params.edge_thickness_gain * (1.0 - cprof)
     thickness = np.where(cm > 0.01, base_t, 0.0).astype(np.float32)
     thickness += (params.glyph_mass_gain * gprof).astype(np.float32)
     back = np.where(cm > 0.01, front - thickness, 0.0).astype(np.float32)
 
     normals = height_to_normals(front, params.normal_scale)
-    gx, gy = _central_gradient(front)
-    slope = np.sqrt(gx * gx + gy * gy).astype(np.float32)
+    slope = _slope(front)
+    container_slope = _slope(container_front)
+    glyph_slope = _slope(glyph_relief_map)
     curvature = _curvature(front)
     local_radius = np.where(gm > 0.5, np.maximum(gsdf, 0.0), 0.0).astype(np.float32)
 
@@ -189,11 +200,14 @@ def build_surface_maps(
         glyph_sdf=gsdf,
         container_profile=cprof.astype(np.float32),
         glyph_profile=gprof.astype(np.float32),
+        glyph_relief_map=glyph_relief_map,
         front_height=front,
         back_height=back,
         thickness=thickness,
         normals=normals,
         slope=slope,
+        container_slope=container_slope,
+        glyph_slope=glyph_slope,
         curvature=curvature,
         local_radius=local_radius,
     )
