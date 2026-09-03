@@ -1,0 +1,67 @@
+name: Liquid Glass V7 Offline Reference
+
+on:
+  push:
+    branches: [ v4.1-clear-glass ]
+    paths:
+      - 'tools/liquid_glass_v7/**'
+      - '.github/workflows/liquid-glass-v7.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: liquid-glass-v7-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  v7-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Python tooling
+        run: |
+          python3 -m pip install --disable-pip-version-check -r tools/requirements.txt
+          python3 -m pip install --disable-pip-version-check opencv-python-headless
+
+      - name: Install Blender
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y blender
+
+      - name: Prepare official GitHub contour
+        run: python3 tools/liquid_glass_v7/prepare_glyph.py
+
+      - name: Render inverse-bake black pass
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_black.png --bg black
+
+      - name: Render inverse-bake white pass
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_white.png --bg white
+
+      - name: Render inverse-bake gray validation pass
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_gray.png --bg gray
+
+      - name: Render 3D midtone master
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_midtone.png --bg midtone
+
+      - name: Render refraction stress
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_checker.png --bg checker
+
+      - name: Render container only
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_container_only.png --bg midtone --glyph off
+
+      - name: Render glyph only
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_glyph_only.png --bg midtone --container off
+
+      - name: Render no-specular studio test
+        run: blender --background --python tools/liquid_glass_v7/blender_scene.py -- --glyph-json build/liquid-glass-v7/github_contour.json --out build/liquid-glass-v7/render_no_specular.png --bg midtone --studio off
+
+      - name: Derive production static RGBA and previews
+        run: python3 tools/liquid_glass_v7/inverse_bake.py
+
+      - name: Upload V7 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkeuoOS-Liquid-Glass-V7-Offline
+          path: build/liquid-glass-v7/**
+          if-no-files-found: error
