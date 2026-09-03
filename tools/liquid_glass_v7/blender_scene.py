@@ -148,7 +148,10 @@ def add_area(name: str, location, energy: float, size: float):
 def configure_render(scene) -> None:
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 36
-    scene.cycles.use_denoising = True
+    # Ubuntu's distro Blender is built without OpenImageDenoiser. Denoising is
+    # not part of the material model anyway, so keep the ray-traced reference
+    # deterministic and render raw Cycles samples instead of failing the job.
+    scene.cycles.use_denoising = False
     scene.cycles.max_bounces = 8
     scene.cycles.transmission_bounces = 8
     scene.cycles.transparent_max_bounces = 8
