@@ -53,7 +53,14 @@ def make_glass(name: str, *, ior: float, roughness: float, absorption_density: f
     return mat
 
 
-def superellipse_points(a: float = 1.30, n: float = 4.7, count: int = 224):
+def superellipse_points(a: float = 1.18, n: float = 4.4, count: int = 256):
+    """Inner crown outline. The large bevel supplies the optical shoulder.
+
+    Keeping the final footprint roughly unchanged while shrinking this crown and
+    increasing bevel width turns the old thin perimeter into a broad curved
+    volume. At frontal view the shoulder now occupies roughly 18-20% of the icon
+    radius instead of behaving like a decorative rim.
+    """
     pts = []
     e = 2.0 / n
     for i in range(count):
@@ -118,8 +125,8 @@ def make_background(kind: str):
     nt.links.new(emission.outputs["Emission"], out.inputs["Surface"])
     plane.data.materials.append(mat)
 
-    # Exact camera/transmission target. It must not become part of the studio
-    # environment, otherwise black/white inverse solving would be contaminated.
+    # Exact camera/transmission target. It must not contaminate reflections,
+    # otherwise black/white inverse solving stops representing the same object.
     for attr, value in (
         ("visible_camera", True),
         ("visible_transmission", True),
@@ -133,29 +140,80 @@ def make_background(kind: str):
     return plane
 
 
-def add_area(name: str, location, energy: float, size: float):
-    data = bpy.data.lights.new(name=name, type="AREA")
-    data.energy = energy
-    data.shape = "DISK"
-    data.size = size
-    obj = bpy.data.objects.new(name, data)
-    bpy.context.collection.objects.link(obj)
-    obj.location = location
-    point_at(obj)
-    return obj
+def _dot_ramp(nt, normal_socket, direction, dark: float, mid: float, bright: float, name: str):
+    dot = nt.nodes.new("ShaderNodeVectorMath")
+    dot.name = f"{name}Dot"
+    dot.operation = "DOT_PRODUCT"
+    dot.inputs[1].default_value = (*direction, 0.0)
+    nt.links.new(normal_socket, dot.inputs[0])
+
+    remap = nt.nodes.new("ShaderNodeMapRange")
+    remap.name = f"{name}Range"
+    remap.clamp = True
+    remap.inputs["From Min"].default_value = -1.0
+    remap.inputs["From Max"].default_value = 1.0
+    remap.inputs["To Min"].default_value = 0.0
+    remap.inputs["To Max"].default_value = 1.0
+    nt.links.new(dot.outputs["Value"], remap.inputs["Value"])
+
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.name = f"{name}Ramp"
+    ramp.color_ramp.interpolation = "EASE"
+    ramp.color_ramp.elements.remove(ramp.color_ramp.elements[1])
+    e0 = ramp.color_ramp.elements[0]
+    e0.position = 0.0
+    e0.color = (dark, dark, dark, 1.0)
+    e1 = ramp.color_ramp.elements.new(0.57)
+    e1.color = (mid, mid, mid, 1.0)
+    e2 = ramp.color_ramp.elements.new(0.86)
+    e2.color = (bright, bright, bright, 1.0)
+    e3 = ramp.color_ramp.elements.new(1.0)
+    e3.color = (min(1.0, bright * 1.10),) * 3 + (1.0,)
+    nt.links.new(remap.outputs["Result"], ramp.inputs["Fac"])
+    return ramp.outputs["Color"]
+
+
+def configure_world(scene, enabled: bool) -> None:
+    world = scene.world
+    world.use_nodes = True
+    nt = world.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    bg = nt.nodes.new("ShaderNodeBackground")
+
+    if not enabled:
+        bg.inputs["Color"].default_value = (0.018, 0.018, 0.018, 1.0)
+        bg.inputs["Strength"].default_value = 0.16
+        nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+        return
+
+    # Directional world radiance is a broad neutral studio environment rather
+    # than visible area-light cards. This removes V7-run2's diagonal reflection
+    # streak while preserving physically derived asymmetric material response.
+    tex = nt.nodes.new("ShaderNodeTexCoord")
+    normal = tex.outputs["Normal"]
+    key = _dot_ramp(nt, normal, (-0.58, -0.70, 0.41), 0.012, 0.075, 0.88, "Key")
+    fill = _dot_ramp(nt, normal, (0.70, -0.05, 0.33), 0.008, 0.045, 0.33, "Fill")
+
+    mix = nt.nodes.new("ShaderNodeMixRGB")
+    mix.blend_type = "ADD"
+    mix.inputs[0].default_value = 1.0
+    nt.links.new(key, mix.inputs[1])
+    nt.links.new(fill, mix.inputs[2])
+
+    bg.inputs["Strength"].default_value = 0.92
+    nt.links.new(mix.outputs["Color"], bg.inputs["Color"])
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
 
 
 def configure_render(scene) -> None:
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 36
-    # Ubuntu's distro Blender is built without OpenImageDenoiser. Denoising is
-    # not part of the material model anyway, so keep the ray-traced reference
-    # deterministic and render raw Cycles samples instead of failing the job.
+    scene.cycles.samples = 48
     scene.cycles.use_denoising = False
-    scene.cycles.max_bounces = 8
-    scene.cycles.transmission_bounces = 8
-    scene.cycles.transparent_max_bounces = 8
-    scene.cycles.glossy_bounces = 5
+    scene.cycles.max_bounces = 10
+    scene.cycles.transmission_bounces = 10
+    scene.cycles.transparent_max_bounces = 10
+    scene.cycles.glossy_bounces = 6
     scene.cycles.diffuse_bounces = 2
 
     scene.render.resolution_x = 640
@@ -179,60 +237,48 @@ def main() -> None:
 
     scene = bpy.context.scene
     configure_render(scene)
-
-    world = scene.world
-    world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
-    bg.inputs["Color"].default_value = (0.018, 0.018, 0.018, 1.0)
-    bg.inputs["Strength"].default_value = 0.34 if args.studio == "on" else 0.065
+    configure_world(scene, args.studio == "on")
 
     container_mat = make_glass(
         "ContainerGlass",
         ior=1.48,
         roughness=0.050,
-        absorption_density=0.038,
-        transmission_luma=0.992,
+        absorption_density=0.026,
+        transmission_luma=0.995,
     )
     glyph_mat = make_glass(
         "GlyphGlass",
         ior=1.52,
-        roughness=0.035,
-        absorption_density=0.34,
-        transmission_luma=0.945,
+        roughness=0.042,
+        absorption_density=0.55,
+        transmission_luma=0.920,
     )
 
     if args.container == "on":
         make_filled_curve(
             "Container",
             superellipse_points(),
-            extrude=0.150,
-            bevel=0.160,
-            bevel_resolution=9,
+            extrude=0.205,
+            bevel=0.275,
+            bevel_resolution=12,
             z=0.0,
             material=container_mat,
         )
 
     if args.glyph == "on":
         payload = json.loads(Path(args.glyph_json).read_text(encoding="utf-8"))
-        glyph_pts = [(p[0] * 1.055, p[1] * 1.055) for p in payload["points"]]
+        glyph_pts = [(p[0] * 1.50, p[1] * 1.50) for p in payload["points"]]
         make_filled_curve(
             "Glyph",
             glyph_pts,
-            extrude=0.072,
-            bevel=0.052,
-            bevel_resolution=7,
-            z=0.278 if args.container == "on" else 0.0,
+            extrude=0.090,
+            bevel=0.085,
+            bevel_resolution=9,
+            z=0.235 if args.container == "on" else 0.0,
             material=glyph_mat,
         )
 
     make_background(args.bg)
-
-    if args.studio == "on":
-        # Large asymmetric studio sources. These are actual scene lights, not a
-        # painted streak in the RGBA asset.
-        add_area("Key", (-3.5, -4.2, 5.6), 920.0, 4.4)
-        add_area("Fill", (3.8, -1.8, 4.8), 430.0, 3.0)
-        add_area("Top", (0.2, 4.4, 4.0), 250.0, 2.7)
 
     cam_data = bpy.data.cameras.new("Camera")
     cam = bpy.data.objects.new("Camera", cam_data)
