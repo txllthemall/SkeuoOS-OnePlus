@@ -11,26 +11,33 @@ from liquid_glass_v4.surface import SurfaceMaps, smootherstep
 class TransportParams:
     ior: float = 1.50
 
-    # Optical extinction/scattering coefficients are art-directed but applied
-    # through Beer-Lambert-style transport instead of layer opacity stacking.
-    container_absorption: float = 0.17
-    container_scattering: float = 0.055
-    glyph_absorption_add: float = 0.82
-    glyph_scattering_add: float = 0.78
+    # V5.1 treats the medium as a mostly clear dielectric. Extinction is now
+    # energy-conserving: absorption + scattering both reduce transmission, and
+    # scattering returns neutral radiance instead of silently turning glass gray.
+    container_absorption: float = 0.006
+    container_scattering: float = 0.030
+    glyph_absorption_add: float = 0.025
+    glyph_scattering_add: float = 0.340
 
-    path_base: float = 0.72
-    path_gain: float = 1.55
-    glyph_path_gain: float = 0.72
+    path_base: float = 0.40
+    path_gain: float = 0.75
+    glyph_path_gain: float = 0.55
 
-    scatter_luma_container: float = 0.62
-    scatter_luma_glyph: float = 0.91
-    scatter_energy: float = 0.62
+    scatter_luma_container: float = 0.72
+    scatter_luma_glyph: float = 0.99
+    scatter_energy: float = 0.95
 
-    front_reflection_gain: float = 1.16
-    back_reflection_gain: float = 0.86
-    sharp_specular_gain: float = 0.22
-    glyph_specular_gain: float = 0.30
-    rim_energy: float = 0.020
+    front_reflection_gain: float = 1.10
+    back_reflection_gain: float = 0.80
+    edge_reflection_boost: float = 0.165
+    edge_back_boost: float = 0.105
+
+    interface_bright_gain: float = 0.100
+    interface_dark_gain: float = 0.080
+
+    sharp_specular_gain: float = 0.18
+    glyph_specular_gain: float = 0.27
+    rim_energy: float = 0.012
 
 
 @dataclass(frozen=True)
@@ -69,8 +76,8 @@ def _studio_env(normal: np.ndarray) -> np.ndarray:
     f = smootherstep(f)
     horizon = np.exp(-np.square((rz + 0.02) / 0.24)).astype(np.float32)
     floor = np.clip(0.5 + 0.5 * (0.18 * rx + 0.70 * ry - 0.22 * rz), 0.0, 1.0)
-    env = 0.035 + 0.73 * k + 0.16 * f + 0.12 * horizon - 0.20 * floor
-    return np.clip(env, 0.015, 1.0).astype(np.float32)
+    env = 0.055 + 0.76 * k + 0.18 * f + 0.13 * horizon - 0.16 * floor
+    return np.clip(env, 0.025, 1.0).astype(np.float32)
 
 
 def _sharp_spec(normal: np.ndarray, exponent: float) -> np.ndarray:
@@ -91,14 +98,12 @@ def bake_static_rgba(
     params: TransportParams = TransportParams(),
     flags: BakeFlags = BakeFlags(),
 ) -> np.ndarray:
-    """Derive a straight-alpha RGBA asset from background-independent transport.
+    """Derive a straight-alpha RGBA asset from a neutral transport operator.
 
-    We model the desired static operator as C_out = T*C_bg + R, where T is
-    transmitted background energy and R is neutral reflected/scattered radiance.
-    A normal Android RGBA pixel implements the same operator with
-    alpha = 1-T and source_rgb = R/alpha. This makes the static bake a compact
-    approximation of a dielectric transport operator rather than a pile of
-    decorative opacity layers.
+    The target static operator is C_out = T*C_bg + R. Android's normal alpha
+    blend implements the same form when alpha=1-T and source_rgb=R/alpha.
+    V5.1 makes the medium energy-conserving and moves the perceptual glass cue
+    toward broad front/back interfaces rather than uniform absorption.
     """
     cm = np.clip(maps.container_mask, 0.0, 1.0)
     gm = np.clip(maps.glyph_mask, 0.0, 1.0)
@@ -107,67 +112,91 @@ def bake_static_rgba(
     tmax = max(float(np.percentile(tvals, 99.0)) if tvals.size else 1.0, 1e-6)
     tn = np.clip(maps.thickness / tmax, 0.0, 1.0)
     radius = np.clip(maps.local_radius / 28.0, 0.0, 1.0)
-    glyph_mass = gm * np.clip(0.38 + 0.62 * radius, 0.0, 1.0)
+    glyph_mass = gm * np.clip(0.36 + 0.64 * radius, 0.0, 1.0)
 
     path = params.path_base + params.path_gain * np.sqrt(tn) + params.glyph_path_gain * glyph_mass
     sigma_a = params.container_absorption + params.glyph_absorption_add * glyph_mass
     sigma_s = params.container_scattering + params.glyph_scattering_add * glyph_mass
+    sigma_t = np.maximum(sigma_a + sigma_s, 1e-6)
 
-    beer_absorb = np.exp(-sigma_a * path).astype(np.float32)
-    scatter_fraction = (1.0 - np.exp(-sigma_s * path)).astype(np.float32)
+    medium_T = np.exp(-sigma_t * path).astype(np.float32)
+    single_scatter = (sigma_s / sigma_t) * (1.0 - medium_T)
 
     nf = maps.front_normals
     nb = maps.back_normals
     ff = _fresnel(nf[..., 2], params.ior)
     fb = _fresnel(nb[..., 2], params.ior)
 
-    # Slightly amplify physical Fresnel at launcher scale, but keep center
-    # reflection low and let grazing shoulders carry the material identity.
+    # Physical F0 remains low in the clear crown. The broad curved shoulder gets
+    # an art-directed grazing boost so the material survives 64–96 px without
+    # becoming an opaque card.
     slope = _norm01(maps.front_slope)
     back_slope = _norm01(maps.back_slope)
-    ff_eff = np.clip(ff * params.front_reflection_gain + 0.055 * np.sqrt(slope), 0.0, 0.72)
-    fb_eff = np.clip(fb * params.back_reflection_gain + 0.040 * np.sqrt(back_slope), 0.0, 0.58)
+    ff_eff = np.clip(
+        ff * params.front_reflection_gain + params.edge_reflection_boost * np.power(slope, 0.62),
+        0.0,
+        0.66,
+    )
+    fb_eff = np.clip(
+        fb * params.back_reflection_gain + params.edge_back_boost * np.power(back_slope, 0.66),
+        0.0,
+        0.50,
+    )
 
     env_f = _studio_env(nf)
     env_b = _studio_env(nb)
 
-    # Transmittance through both interfaces and absorbing medium.
-    T = (1.0 - ff_eff) * beer_absorb * (1.0 - fb_eff)
+    # Two-interface transmittance through a genuinely low-extinction core.
+    T = (1.0 - ff_eff) * medium_T * (1.0 - fb_eff)
 
-    # Front reflection + attenuated back reflection + volumetric neutral scatter.
+    # Front reflection, rear interface reflection after a partial internal path,
+    # and energy-conserving single-scatter return.
     R_front = ff_eff * env_f
-    internal_to_back = (1.0 - ff_eff) * np.sqrt(beer_absorb)
+    internal_to_back = (1.0 - ff_eff) * np.sqrt(medium_T)
     R_back = internal_to_back * fb_eff * env_b
 
     scatter_luma = (
         params.scatter_luma_container * (1.0 - gm)
-        + (params.scatter_luma_container * 0.35 + params.scatter_luma_glyph * 0.65) * gm
+        + (0.22 * params.scatter_luma_container + 0.78 * params.scatter_luma_glyph) * gm
     )
-    R_scatter = params.scatter_energy * scatter_fraction * scatter_luma
+    R_scatter = (1.0 - ff_eff) * params.scatter_energy * single_scatter * scatter_luma
 
     R = R_front + R_back + R_scatter
 
+    # Signed front/back disagreement acts as a static approximation of the
+    # luminance redistribution normally produced by lensing. It is evaluated on
+    # the entire curved shoulder, not drawn as two hand-authored outlines.
+    signed_interface = (env_f - env_b) * np.sqrt(np.clip(slope * back_slope, 0.0, 1.0)) * cm
+    pos = np.clip(signed_interface, 0.0, 1.0)
+    neg = np.clip(-signed_interface, 0.0, 1.0)
+    R += params.interface_bright_gain * pos
+    T *= (1.0 - params.interface_dark_gain * neg)
+
     if flags.explicit_rim:
-        # Tiny physical silhouette energy only. The volume must survive without it.
+        # Subpixel silhouette stabilizer only. No material gate may depend on it.
         rim = smootherstep(np.clip((maps.q - 0.968) / 0.032, 0.0, 1.0)) * cm
         R += params.rim_energy * rim
-        T *= (1.0 - 0.012 * rim)
+        T *= (1.0 - 0.008 * rim)
 
     if flags.specular:
-        csp = _sharp_spec(maps.container_front_normals, 48.0) * np.sqrt(_norm01(maps.container_front_slope)) * cm
-        gsp = _sharp_spec(nf, 34.0) * np.sqrt(np.clip(_norm01(maps.glyph_slope), 0.0, 1.0)) * gm
+        csp = _sharp_spec(maps.container_front_normals, 50.0) * np.sqrt(_norm01(maps.container_front_slope)) * cm
+        gsp = _sharp_spec(nf, 36.0) * np.sqrt(np.clip(_norm01(maps.glyph_slope), 0.0, 1.0)) * gm
         R += params.sharp_specular_gain * csp + params.glyph_specular_gain * gsp
 
-    # No drop shadow: depth is entirely optical/material.
-    T = np.where(cm > 1e-4, np.clip(T, 0.08, 0.995), 1.0)
+    # No external shadow. The object must remain dimensional in no-shadow mode.
+    T = np.where(cm > 1e-4, np.clip(T, 0.12, 0.998), 1.0)
     R = np.where(cm > 1e-4, np.clip(R, 0.0, 1.0), 0.0)
 
-    alpha = np.clip(1.0 - T, 0.0, 0.92)
-    src = np.divide(R, np.maximum(alpha, 1e-6), out=np.full_like(alpha, 0.5), where=alpha > 1e-6)
+    alpha = np.clip(1.0 - T, 0.0, 0.88)
+    src = np.divide(
+        R,
+        np.maximum(alpha, 1e-6),
+        out=np.full_like(alpha, 0.5),
+        where=alpha > 1e-6,
+    )
     src = np.clip(src, 0.0, 1.0)
 
-    # Neutral material: all channels exactly equal. Wallpaper hue comes only
-    # from the background transmitted by alpha compositing.
+    # Intrinsic hue is exactly neutral. Wallpaper colour only arrives through T.
     rgb = np.round(src * 255.0).astype(np.uint8)
     a = np.round(alpha * 255.0).astype(np.uint8)
     return np.stack((rgb, rgb, rgb, a), axis=-1)
