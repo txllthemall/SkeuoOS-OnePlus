@@ -115,9 +115,11 @@ def main() -> None:
     side_by_side(old, new).save(OUT / "preview_v3_old_vs_new.png")
     difference_heatmap(old, new, wallpaper("midtone", (900, 900))).save(OUT / "preview_v3_difference_heatmap.png")
 
+    # preview_optics now owns physical pixel scaling internally. These gains are
+    # dimensionless material multipliers, not legacy 30x/34x UV amplifiers.
     checker = wallpaper("highcontrast", (SIZE, SIZE))
-    render_optical_preview(maps, checker, displacement_scale=34.0).save(OUT / "preview_v3_checker_refraction.png")
-    render_optical_preview(maps, wallpaper("midtone", (SIZE, SIZE)), displacement_scale=30.0).save(OUT / "preview_v3_optical_stress.png")
+    render_optical_preview(maps, checker, displacement_scale=1.00).save(OUT / "preview_v3_checker_refraction.png")
+    render_optical_preview(maps, wallpaper("midtone", (SIZE, SIZE)), displacement_scale=0.90).save(OUT / "preview_v3_optical_stress.png")
 
     data = diagnostics_dict(new, maps)
     data.update({
@@ -127,6 +129,7 @@ def main() -> None:
         "legacy_used_for_material": False,
         "production_background_sampling": False,
         "front_back_interfaces": True,
+        "optical_preview_displacement_units": "dimensionless material gain",
     })
     save_diagnostics_json(OUT / "v3_diagnostics.json", data)
 
